@@ -316,6 +316,30 @@ def check_pay_period_comes_from_the_record_not_the_json_ld():
           row.employment_type, "CONTRACTOR")
 
 
+def check_every_rate_period_is_one_we_measured():
+    """Gives `RATE_PERIODS` a reader, and catches a fifth one appearing.
+
+    Measured across the 390 live listings on 2026-09-18: hourly 347,
+    per-task 31, one-time 9, yearly 3. An unknown period is deliberately
+    passed THROUGH to the row rather than dropped — a new arrangement
+    should appear in the data, not vanish from it — so this check is how a
+    fifth one becomes visible instead of silently widening the meaning of
+    the `rate_min` column.
+    """
+    from product_parser import (parse_listing_page, is_known_rate_period,
+                                RATE_PERIODS, EXPLORE_URL)
+    rows = parse_listing_page(EXPLORE_HTML, url=EXPLORE_URL, page=1).rows
+    seen = {r.rate_period for r in rows}
+    check("every period in the fixture is one we measured",
+          seen <= set(RATE_PERIODS), "unexpected: %s" % (seen - set(RATE_PERIODS)))
+    check("the fixture covers more than one of them, or this proves little",
+          len(seen) > 1, str(seen))
+    check("the predicate agrees", all(is_known_rate_period(p) for p in seen))
+    check("...and rejects something else", not is_known_rate_period("fortnightly"))
+    check("...and treats a missing period as unknown",
+          not is_known_rate_period(None))
+
+
 def check_currency_is_never_defaulted():
     """§4: absent is null, never a defaulted "USD".
 

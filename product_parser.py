@@ -442,12 +442,16 @@ def job_url(listing_id: Any, slug: Optional[str] = None) -> Optional[str]:
     return "%s/jobs/%s%s" % (BASE_MARKETPLACE, ident, "/" + tail if tail else "")
 
 
-def explore_url() -> str:
-    return EXPLORE_URL
-
-
-def careers_url() -> str:
-    return CAREERS_URL
+# NO `explore_url()` / `careers_url()` helpers here, and their absence is a
+# removal rather than an omission. Both existed and only returned
+# `EXPLORE_URL` / `CAREERS_URL` — module constants every caller already
+# imports directly — so nothing ever called either. CLAUDE.md §17: a
+# wrapper that only delegates is the same defect as dead code, and harder
+# to see, because it reads like an API.
+#
+# Found by grepping every public name in this module for a consumer outside
+# it, which is the check that section recommends and which is worth running
+# before publishing rather than after.
 
 
 def sku_from_url(url: str) -> Optional[str]:
@@ -729,6 +733,24 @@ def careers_from_next_data(payload: Any) -> List[Dict[str, Any]]:
 # "per-task" and "one-time" are genuinely different arrangements and folding
 # either into "hourly" would make the rate column mean two things.
 RATE_PERIODS = ("hourly", "per-task", "one-time", "yearly")
+
+
+def is_known_rate_period(value: Any) -> bool:
+    """Whether `payRateFrequency` is one of the four periods measured here.
+
+    This exists so `RATE_PERIODS` has a READER. A constant carrying a
+    measurement and consulted by nothing is the same defect as dead code —
+    it reads like enforcement and enforces nothing (CLAUDE.md §17), and
+    this one was exactly that until the pre-publication grep found it.
+
+    It does not gate anything: an unknown period is passed through to the
+    row unchanged, because a new arrangement Mercor invents should appear
+    in the data rather than vanish from it. The value of knowing is in the
+    log line and in the suite, which asserts that a live run's periods are
+    a subset of this tuple — so a fifth one shows up as a failing check
+    rather than as a column nobody rereads.
+    """
+    return _str_or_none(value) in RATE_PERIODS
 
 # Ashby states an interval per compensation component. The mapping is to the
 # marketplace's vocabulary so one `rate_period` column reads the same across
