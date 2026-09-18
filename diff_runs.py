@@ -284,10 +284,26 @@ def _check_comparable(args) -> bool:
                 f"{meta.get('pages_completed')} of {meta.get('pages_requested')} "
                 f"page(s), reason {meta.get('stop_reason')!r}")
     if len(set(modes.values())) > 1:
-        problems.append(
-            f"the two runs are different modes ({modes}). A listing row and a "
-            f"detail row carry different fields, so `added`/`removed` would "
-            f"describe the mode change rather than the catalogue.")
+        kinds = set(modes.values())
+        # `careers` against either marketplace mode is the severe case and
+        # deserves its own sentence: the two share NO ids at all, so every
+        # row would be reported as both added and removed. `listings`
+        # against `job` is milder — same id space, different columns — but
+        # still describes the mode change rather than the catalogue.
+        if "careers" in kinds and kinds - {"careers"}:
+            problems.append(
+                f"the two runs are different POPULATIONS ({modes}). Mercor's "
+                f"own openings are Ashby records with UUID ids; marketplace "
+                f"listings are `list_…` ids. The two sets have no id in "
+                f"common, so every row would be reported as both added and "
+                f"removed.")
+        else:
+            problems.append(
+                f"the two runs are different modes ({modes}). An index row "
+                f"and a detail row carry different columns — the index has "
+                f"`domain` and the slot counters, a detail row has the "
+                f"company website and a currency — so `added`/`removed` "
+                f"would describe the mode change rather than the catalogue.")
 
     # NO SORT GUARD, and that absence is a measurement rather than an
     # omission. A sibling repo in this family needs one because its default
