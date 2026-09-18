@@ -62,6 +62,8 @@ python3 playwright_scraper.py --mode careers
 
 # Every listing's detail page. A "page" here is one job, enumerated from the
 # sitemap AND the index — 462 of them on 2026-09-18.
+# (--concurrency is Playwright-only; the other two engines log that they
+#  ignore it and fetch one page at a time.)
 python3 playwright_scraper.py --mode job --pages 462 --concurrency 4
 
 # One specific listing
@@ -197,11 +199,25 @@ pip install -r requirements.txt -r requirements-puppeteer.txt
 unsatisfiable pins (`pyee` <12 vs ≥13), and pyppeteer and selenium collide
 on `urllib3`. Use a virtualenv per engine if you need more than one.
 
-Known limits, stated rather than left to be discovered: Selenium cannot use
-an **authenticated** remote CDP endpoint (`debuggerAddress` takes a bare
-`host:port` with nowhere to put a password), Selenium's `--proxy-server`
-cannot authenticate at all (credentials are stripped and warned about), and
-pyppeteer is effectively unmaintained — its own README points at Playwright.
+Known limits, stated rather than left to be discovered:
+
+- **`--concurrency` works in the Playwright engine only.** Selenium and
+  pyppeteer accept the flag — it is part of the family's CLI contract — and
+  log that they are ignoring it, fetching one page at a time. Parallel
+  fetching is implemented in `playwright_scraper.py`, which is the primary
+  engine. This matters only in `--mode job`, the one mode with more than one
+  page to fetch.
+- **Selenium cannot use an authenticated remote CDP endpoint.**
+  chromedriver's `debuggerAddress` takes a bare `host:port` with nowhere to
+  put a password, unlike Playwright's `connect_over_cdp` and Puppeteer's
+  `browserWSEndpoint`.
+- **Selenium's `--proxy-server` cannot authenticate at all.** Credentials are
+  stripped and warned about rather than silently ignored.
+- **pyppeteer is effectively unmaintained** — its own README points at
+  Playwright.
+
+Everything else is identical, and "identical" here means verified rather
+than intended: same flags, same exit codes, same run status, same rows.
 
 `scraper_api_client.py` is a fourth path that renders the page on 2Captcha's
 infrastructure and returns HTML over plain HTTPS. On this site it is the one

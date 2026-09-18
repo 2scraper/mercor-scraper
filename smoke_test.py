@@ -1204,6 +1204,54 @@ def check_engine_flag_sets():
               % (a, sorted(only_a), b, sorted(only_b)))
 
 
+def check_the_concurrency_difference_is_documented_in_both_directions():
+    """§20: the exception list IS the documentation.
+
+    All three engines take `--concurrency` because it is in the family's CLI
+    contract, but only the Playwright engine implements it — the other two
+    log that they are ignoring it and fetch one page at a time. That is a
+    legitimate design difference, and an UNDOCUMENTED one is how a sibling
+    repo's README came to promise "same CLI" while twelve flags differed.
+
+    Pinned in both directions, which is the half that is easy to skip: a
+    mirror that silently stops warning fails here, and so does the primary
+    engine losing its implementation. Closing the difference is then a
+    decision someone makes on purpose rather than a surprise.
+    """
+    primary, mirrors = "playwright_scraper", ("selenium_scraper", "puppeteer_scraper")
+    src = {}
+    for module in (primary,) + mirrors:
+        path = os.path.join(HERE, module + ".py")
+        if os.path.exists(path):
+            src[module] = open(path, encoding="utf-8").read()
+
+    if primary in src:
+        check("the primary engine actually implements concurrency",
+              "_fetch_pages_concurrently" in src[primary],
+              "no concurrent fetch path found in the engine that documents one")
+        check("...and consults the shared policy for it",
+              "concurrency_for_mode" in src[primary]
+              and "concurrency_limit" in src[primary])
+    for module in mirrors:
+        if module not in src:
+            continue
+        check("%s says out loud that it ignores --concurrency" % module,
+              "--concurrency is ignored in this engine" in src[module],
+              "a mirror that silently accepts the flag looks like it "
+              "parallelises and does not")
+        check("...and does not secretly implement it after all" % (),
+              "_fetch_pages_concurrently" not in src[module],
+              "%s has a concurrent fetch path but still warns that it "
+              "ignores the flag — one of the two is now a lie" % module)
+
+    # And the README has to carry it, because a difference nobody documented
+    # is one a user discovers from a run that took four times as long.
+    readme = open(os.path.join(HERE, "README.md"), encoding="utf-8").read()
+    check("the README names the engine that parallelises",
+          "Playwright engine only" in readme or "Playwright-only" in readme,
+          "the concurrency difference is not in the README")
+
+
 def check_banned_and_removed_flags():
     """Scoped to the ENGINES.
 
