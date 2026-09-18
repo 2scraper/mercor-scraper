@@ -128,18 +128,36 @@ DETAIL_HTML = r'''<html><head><link href="/_next/static/css/app.css"/><script>va
 # all, which must come back null rather than zero.
 CAREERS_HTML = r'''<html><head><link href="/_next/static/css/app.css"/><script>var a=document.createElement('script');a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';</script></head><body><h1>Careers</h1><script id="__NEXT_DATA__" type="application/json" nonce="x50vDK">{"props": {"pageProps": {"jobs": [{"id": "5bef09c2-fc72-4f20-8bd3-1b221cfa89d0", "title": "Administrative Generalist", "department": "Operations", "team": "Admin", "employmentType": "FullTime", "location": "San Francisco", "shouldDisplayCompensationOnJobPostings": true, "publishedAt": "2026-04-18T00:34:24.377+00:00", "isListed": true, "isRemote": false, "workplaceType": "OnSite", "address": {"postalAddress": {"addressRegion": "California", "addressCountry": "United States", "addressLocality": "San Francisco"}}, "jobUrl": "https://jobs.ashbyhq.com/mercor/5bef09c2-fc72-4f20-8bd3-1b221cfa89d0", "applyUrl": "https://jobs.ashbyhq.com/mercor/5bef09c2-fc72-4f20-8bd3-1b221cfa89d0/application", "descriptionHtml": "<h1><strong>About Mercor</strong></h1><p style=\"min-height:1.5em\"></p><p style=\"min-height:1.5em\">Mercor's mission is to organize human intelligence to power th \u2026[trimmed for the fixture]", "descriptionPlain": "ABOUT MERCOR\n\n\n\nMercor's mission is to organize human intelligence to power the AI economy. We're a leading AI data company, building the layer between human ex \u2026[trimmed for the fixture]", "compensation": {"compensationTierSummary": "$100K \u2013 $120K \u2022 Offers Equity \u2022 Offers Bonus", "scrapeableCompensationSalarySummary": "$100K - $120K", "compensationTiers": [{"id": "a4c286e8-4267-4df8-9aaa-d7b64d530aa5", "tierSummary": "$100K \u2013 $120K \u2022 Offers Equity \u2022 Offers Bonus", "title": null, "additionalInformation": null, "components": [{"id": "03fd84f8-9eef-4b6e-8ac9-71697341ce99", "summary": "Offers Equity", "compensationType": "EquityPercentage", "interval": "NONE", "currencyCode": null, "minValue": null, "maxValue": null}, {"id": "14bff193-7aef-4f1e-9bd6-318a41264ea9", "summary": "Offers Bonus", "compensationType": "Bonus", "interval": "1 YEAR", "currencyCode": "USD", "minValue": null, "maxValue": null}, {"id": "60932949-8ce4-41ae-a6b1-41f5d7339024", "summary": "$100K \u2013 $120K", "compensationType": "Salary", "interval": "1 YEAR", "currencyCode": "USD", "minValue": 100000, "maxValue": 120000}]}], "summaryComponents": [{"compensationType": "EquityPercentage", "interval": "NONE", "currencyCode": null, "minValue": null, "maxValue": null}, {"compensationType": "Bonus", "interval": "1 YEAR", "currencyCode": "USD", "minValue": null, "maxValue": null}, {"compensationType": "Salary", "interval": "1 YEAR", "currencyCode": "USD", "minValue": 100000, "maxValue": 120000}]}, "secondaryLocations": []}, {"id": "70c15d49-619d-4cda-ade7-a7d4b7223cdb", "title": "Strategic Project Lead (UK)", "department": "Operations", "team": "Operations", "employmentType": "FullTime", "location": "London", "shouldDisplayCompensationOnJobPostings": true, "publishedAt": "2026-03-30T15:34:22.677+00:00", "isListed": true, "isRemote": false, "workplaceType": "OnSite", "address": {"postalAddress": {"postalCode": "", "addressRegion": "England", "streetAddress": "221 Pentonville Road,", "addressCountry": "United Kingdom", "addressLocality": "London"}}, "jobUrl": "https://jobs.ashbyhq.com/mercor/70c15d49-619d-4cda-ade7-a7d4b7223cdb", "applyUrl": "https://jobs.ashbyhq.com/mercor/70c15d49-619d-4cda-ade7-a7d4b7223cdb/application", "descriptionHtml": "<h1><strong>About Mercor</strong></h1><p style=\"min-height:1.5em\"></p><p style=\"min-height:1.5em\">Mercor's mission is to organize human intelligence to power th \u2026[trimmed for the fixture]", "descriptionPlain": "ABOUT MERCOR\n\n\n\nMercor's mission is to organize human intelligence to power the AI economy. We're a leading AI data company, building the layer between human ex \u2026[trimmed for the fixture]", "compensation": {"compensationTierSummary": "\u00a389.5K \u2013 \u00a3149.2K \u2022 Offers Equity \u2022 \u00a336K \u2013 \u00a390K Bonus \u2022 Multiple Ranges", "scrapeableCompensationSalarySummary": "\u00a389.5K - \u00a3149.2K", "compensationTiers": [{"id": "28fb7941-6f50-45a7-b304-5e7d35772676", "tierSummary": "Base Salary \u00a389.5K \u2013 \u00a3111.9K \u2022 Offers Equity \u2022 \u00a336K \u2013 \u00a350K Bonus", "title": "Strategic Project Lead", "additionalInformation": null, "components": [{"id": "276ee085-4bfc-4998-9ac7-af53634c6c93", "summary": "Offers Equity", "compensationType": "EquityPercentage", "interval": "NONE", "currencyCode": null, "minValue": null, "maxValue": null}, {"id": "c030ff62-6034-4d77-8973-cbac8214e4d6", "summary": "\u00a336K \u2013 \u00a350K Bonus", "compensationType": "Bonus", "interval": "1 YEAR", "currencyCode": "GBP", "minValue": 36000, "maxValue": 50000}, {"id": "5c60069b-1fa7-4550-a9b8-9ee163b47238", "summary": "Base Salary \u00a389.5K \u2013 \u00a3111.9K", "compensationType": "Salary", "interval": "1 YEAR", "currencyCode": "GBP", "minValue": 89500, "maxValue": 111900}]}, {"id": "4777dede-e224-49b1-866e-b1a761596d74", "tierSummary": "Base Salary \u00a3111.9K \u2013 \u00a3149.2K \u2022 Offers Equity \u2022 \u00a365K \u2013 \u00a390K Bonus", "title": "Senior Strategic Project Lead", "additionalInformation": null, "components": [{"id": "cfd4fc08-99be-416a-8572-708a73468a66", "summary": "\u00a365K \u2013 \u00a390K Bonus", "compensationType": "Bonus", "interval": "1 YEAR", "currencyCode": "GBP", "minValue": 65000, "maxValue": 90000}, {"id": "2ab72b82-b72a-4abf-aacc-209438a9ae15", "summary": "Base Salary \u00a3111.9K \u2013 \u00a3149.2K", "compensationType": "Salary", "interval": "1 YEAR", "currencyCode": "GBP", "minValue": 111900, "maxValue": 149200}, {"id": "ebaa3c82-617b-436b-a1b5-83b562515405", "summary": "Offers Equity", "compensationType": "EquityPercentage", "interval": "NONE", "currencyCode": null, "minValue": null, "maxValue": null}]}], "summaryComponents": [{"compensationType": "EquityPercentage", "minValue": null, "maxValue": null, "interval": "1 YEAR"}, {"minValue": 36000, "maxValue": 90000, "currencyCode": "GBP", "interval": "1 YEAR", "compensationType": "Bonus"}, {"minValue": 89500, "maxValue": 149200, "currencyCode": "GBP", "interval": "1 YEAR", "compensationType": "Salary"}]}, "secondaryLocations": []}, {"id": "a0a98be0-d856-4129-b500-c0a3e412ef01", "title": "Mercor Research Fellowship \u2014 APEX ", "department": "Research", "team": "Research", "employmentType": "Temporary", "location": "San Francisco", "shouldDisplayCompensationOnJobPostings": true, "publishedAt": "2026-08-22T02:19:29.278+00:00", "isListed": true, "isRemote": true, "workplaceType": "Remote", "address": {"postalAddress": {"addressRegion": "California", "addressCountry": "United States", "addressLocality": "San Francisco"}}, "jobUrl": "https://jobs.ashbyhq.com/mercor/a0a98be0-d856-4129-b500-c0a3e412ef01", "applyUrl": "https://jobs.ashbyhq.com/mercor/a0a98be0-d856-4129-b500-c0a3e412ef01/application", "descriptionHtml": "<h1><strong>About Mercor</strong></h1><p style=\"min-height:1.5em\"></p><p style=\"min-height:1.5em\">Mercor's mission is to organize human intelligence to power th \u2026[trimmed for the fixture]", "descriptionPlain": "ABOUT MERCOR\n\n\n\nMercor's mission is to organize human intelligence to power the AI economy. We're a leading AI data company, building the layer between human ex \u2026[trimmed for the fixture]", "compensation": {"compensationTierSummary": "$40K \u2013 $80K once \u2022 Multiple Ranges", "scrapeableCompensationSalarySummary": null, "compensationTiers": [{"id": "7db53b40-e039-46b3-9d52-904bbb35fc77", "tierSummary": "Stipend $40K once", "title": "3 Month", "additionalInformation": null, "components": [{"id": "0076fa83-2b40-4c34-9774-3d5c67a50b3b", "summary": "Stipend $40K once", "compensationType": "Salary", "interval": "1 TIME", "currencyCode": "USD", "minValue": 40000, "maxValue": 40000}]}, {"id": "7807cdc5-7566-47a9-ab8d-6ff0085b8736", "tierSummary": "Stipend $80K once", "title": "6 Month", "additionalInformation": null, "components": [{"id": "e45f4372-1dc8-420e-b860-6c363bc08392", "summary": "Stipend $80K once", "compensationType": "Salary", "interval": "1 TIME", "currencyCode": "USD", "minValue": 80000, "maxValue": 80000}]}], "summaryComponents": [{"minValue": 40000, "maxValue": 80000, "currencyCode": "USD", "interval": "1 TIME", "compensationType": "Salary"}]}, "secondaryLocations": ["New York City", "London"]}, {"id": "0187618d-90f6-43fc-95a8-2e63c8c4e79a", "title": "Strategic Project Associate", "department": "Operations", "team": "Operations", "employmentType": "FullTime", "location": "Mexico | Mexico City", "shouldDisplayCompensationOnJobPostings": false, "publishedAt": "2026-09-09T18:24:43.544+00:00", "isListed": true, "isRemote": false, "workplaceType": "OnSite", "address": {"postalAddress": {"addressRegion": "Ciudad de M\u00e9xico", "streetAddress": "", "addressCountry": "Mexico", "addressLocality": "Mexico City"}}, "jobUrl": "https://jobs.ashbyhq.com/mercor/0187618d-90f6-43fc-95a8-2e63c8c4e79a", "applyUrl": "https://jobs.ashbyhq.com/mercor/0187618d-90f6-43fc-95a8-2e63c8c4e79a/application", "descriptionHtml": "<h1><strong>About Mercor</strong></h1><p style=\"min-height:1.5em\"></p><p style=\"min-height:1.5em\">Mercor's mission is to organize human intelligence to power th \u2026[trimmed for the fixture]", "descriptionPlain": "ABOUT MERCOR\n\n\n\nMercor's mission is to organize human intelligence to power the AI economy. We're a leading AI data company, building the layer between human ex \u2026[trimmed for the fixture]", "compensation": {"compensationTierSummary": null, "scrapeableCompensationSalarySummary": null, "compensationTiers": [], "summaryComponents": []}, "secondaryLocations": []}], "careersData": {"title": "Careers"}, "ashbyJid": null, "initialLocation": null}}, "page": "/careers"}</script></body></html>'''
 
-# Mercor's 404, trimmed. It carries NO `__NEXT_DATA__` at all, which is the
-# unambiguous positive signal `detect_page_state` leads with — and it
-# references `/_next/static` MORE often than a real page does (32 against
-# 23-27 on the live captures), which is why the positive-asset heuristic
-# that works on two sibling sites is inverted here and must never be used as
-# a threshold.
-NOT_FOUND_HTML = (
-    '<html><head><link href="/_next/static/css/a.css"/>'
-    '<link href="/_next/static/css/b.css"/><link href="/_next/static/css/c.css"/>'
-    "<script>var a=document.createElement('script');"
-    "a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';</script>"
-    '</head><body><h1>404</h1><p>Page not found</p></body></html>')
+# Mercor's 404 — the REAL curl-fetched capture, scrubbed, not hand-written.
+#
+# The first version of this fixture was INVENTED and carried `<h1>404</h1>`
+# and `<p>Page not found</p>`. The real one carries neither: its visible
+# text is the empty string, on both the HTTP-client and the browser fetch.
+# So the body-marker check that ran against it passed against something
+# this site has never served — §21, a guard is only as good as the fixture
+# it runs against, and the fixture that matters is the one fetched the way
+# a real run fetches.
+#
+# Scrubbed (§10), and only these, everything the site generates around them
+# left untouched: the Sentry trace and span ids, the CSP nonce and the
+# Sentry public key. They are per-request telemetry that grant nothing, but
+# a 32-hex string reads as a live credential to every scanner including
+# this repo's own `--secret-check`. Verified after scrubbing that the
+# fixture still behaves identically: same `/cdn-cgi` count, same 32
+# `/_next/static` references, still no `__NEXT_DATA__`, still no marker,
+# still `not_found` under a 404, still zero visible text.
+#
+# What it demonstrates, and why the HTTP status is not optional here:
+#
+#   * `/_next/static` **32 times**, more than any real page (23-27) — the
+#     positive-asset heuristic is inverted on this site;
+#   * no `__NEXT_DATA__` over an HTTP client, but the LIVE hydrated 404
+#     does have one, so "no payload" is not a signal a browser can use;
+#   * no usable text at all. Across four live pages "404" appears 1 and 2
+#     times on the two 404s and 7 and 17 times on the two GOOD pages.
+#
+# Which leaves the status, and in a browser the `/login` bounce.
+NOT_FOUND_HTML = r'''<!DOCTYPE html><html lang="en" translate="no" data-scroll-behavior="smooth"><head><meta charSet="utf-8"/><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover"/><link rel="stylesheet" href="/_next/static/css/SPANIDPLACEHOLD0.css" nonce="NONCEPLACEHOLDER==" data-precedence="next"/><link rel="stylesheet" href="/_next/static/css/SPANIDPLACEHOLD0.css" nonce="NONCEPLACEHOLDER==" data-precedence="next"/><link rel="stylesheet" href="/_next/static/css/SPANIDPLACEHOLD0.css" nonce="NONCEPLACEHOLDER==" data-precedence="next"/><link rel="stylesheet" href="/_next/static/css/SPANIDPLACEHOLD0.css" nonce="NONCEPLACEHOLDER==" data-precedence="next"/><link rel="preload" as="script" fetchPriority="low" nonce="NONCEPLACEHOLDER==" href="/_next/static/chunks/webpack-SPANIDPLACEHOLD0.js"/><script src="/_next/static/chunks/df617d2f-SPANIDPLACEHOLD0.js" async="" nonce="NONCEPLACEHOLDER=="></script><script src="/_next/static/chunks/4cd79feb-SPANIDPLACEHOLD0.js" async="" nonce="NONCEPLACEHOLDER=="></script><script src="/_next/static/chunks/0937d497-SPANIDPLACEHOLD0.js" async="" nonce="NONCEPLACEHOLDER=="></script><script src="/_next/static/chunks/240127f0-SPANIDPLACEHOLD0.js" async="" nonce="NONCEPLACEHOLDER=="></script><script src="/_next/static/chunks/ee25a943-SPANIDPLACEHOLD0.js" async="" nonce="NONCEPLACEHOLDER=="></script><script src="/_next/static/chunks/85992-SPANIDPLACEHOLD0.js" async="" nonce="NONCEPLACEHOLDER=="></script><script src="/_next/static/chunks/main-app-SPANIDPLACEHOLD0.js" async="" nonce="NONCEPLACEHOLDER=="></script><script src="/_next/static/chunks/817-SPANIDPLACEHOLD0.js" async="" nonce="NONCEPLACEHOLDER=="></script><script src="/_next/static/chunks/49616-SPANIDPLACEHOLD0.js" async="" nonce="NONCEPLACEHOLDER=="></script><script src="/_next/static/chunks/41576-SPANIDPLACEHOLD0.js" async="" nonce="NONCEPLACEHOLDER=="></script><script src="/_next/static/chunks/46758-SPANIDPLACEHOLD0.js" async="" nonce="NONCEPLACEHOLDER=="></script><script src="/_next/static/chunks/app/not-found-SPANIDPLACEHOLD0.js" async="" nonce="NONCEPLACEHOLDER=="></script><script src="/_next/static/chunks/271a3146-SPANIDPLACEHOLD0.js" async="" nonce="NONCEPLACEHOLDER=="></script><script src="/_next/static/chunks/38-SPANIDPLACEHOLD0.js" async="" nonce="NONCEPLACEHOLDER=="></script><script src="/_next/static/chunks/app/layout-SPANIDPLACEHOLD0.js" async="" nonce="NONCEPLACEHOLDER=="></script><script src="/_next/static/chunks/app/error-SPANIDPLACEHOLD0.js" async="" nonce="NONCEPLACEHOLDER=="></script><link rel="preload" href="https://www.googletagmanager.com/gtm.js?id=GTM-P2D44HNL" as="script" nonce="NONCEPLACEHOLDER=="/><meta name="robots" content="noindex"/><meta name="next-size-adjust" content=""/><link rel="preconnect" href="https://www.clarity.ms" crossorigin=""/><link rel="preconnect" href="https://identitytoolkit.googleapis.com" crossorigin=""/><link rel="preconnect" href="https://jotrack.s3.amazonaws.com" crossorigin=""/><link rel="preconnect" href="https://connect.facebook.net" crossorigin=""/><meta name="robots" content="noindex, nofollow"/><script nonce="NONCEPLACEHOLDER==">if(self.trustedTypes&&self.trustedTypes.createPolicy)self.trustedTypes.createPolicy('default',{createHTML:function(s){return s},createScript:function(s){return s},createScriptURL:function(s){return s}})</script><script type="application/ld+json">{"@context":"https://schema.org","@type":"Organization","name":"Mercor","url":"https://work.mercor.com","logo":"https://work.mercor.com/logo.png","description":"We use AI to understand human ability and match talent with the opportunities they're best suited for.","contactPoint":{"@type":"ContactPoint","email":"support@mercor.com","contactType":"Customer Support","areaServed":"Worldwide","availableLanguage":["English"]},"sameAs":["https://www.linkedin.com/company/mercor-ai/","https://twitter.com/mercor","https://www.facebook.com/MercorSoftware/"],"address":{"@type":"PostalAddress","streetAddress":"181 Fremont St","addressLocality":"San Francisco","addressRegion":"CA","postalCode":"94105","addressCountry":"US"},"foundingDate":"2023","knowsAbout":["Talent Acquisition","Remote Work","AI-powered Recruitment","Global Hiring","Technical Recruiting","Software Development"]}</script><meta name="sentry-trace" content="SENTRYTRACEIDPLACEHOLDER00000000-SPANIDPLACEHOLD0-0"/><meta name="baggage" content="sentry-environment=production,sentry-public_key=SENTRYTRACEIDPLACEHOLDER00000000,sentry-trace_id=SENTRYTRACEIDPLACEHOLDER00000000,sentry-org_id=SPANIDPLACEHOLD0,sentry-sampled=false,sentry-sample_rand=0.SPANIDPLACEHOLD0,sentry-sample_rate=0.02"/><script src="/_next/static/chunks/polyfills-SPANIDPLACEHOLD0.js" noModule="" nonce="NONCEPLACEHOLDER=="></script></head><body class="__className_8b3a0b" translate="no"><div hidden=""><!--$--><!--/$--></div><main class="__className_8b3a0b"><div data-rht-toaster="" style="position:fixed;z-index:1000004;top:16px;left:16px;right:16px;bottom:16px;pointer-events:none"></div><div class="meticulous-ignore relative flex h-screen w-screen flex-col items-center justify-center bg-white"><!--$!--><template data-dgst="BAILOUT_TO_CLIENT_SIDE_RENDERING"></template><!--/$--><span class="absolute left-0 right-0 top-0 h-0 w-full bg-white transition-all duration-500"></span></div><div id="portal"></div></main><div id="modal-root"></div><script src="/_next/static/chunks/webpack-SPANIDPLACEHOLD0.js" nonce="NONCEPLACEHOLDER==" id="_R_" async=""></script><script nonce="NONCEPLACEHOLDER==">(self.__next_f=self.__next_f||[]).push([0])</script><script nonce="NONCEPLACEHOLDER==">self.__next_f.push([1,"1:\"$Sreact.fragment\"\n3:I[26082,[],\"\"]\n4:I[64304,[],\"\"]\n5:I[42537,[\"817\",\"static/chunks/817-SPANIDPLACEHOLD0.js\",\"49616\",\"static/chunks/49616-SPANIDPLACEHOLD0.js\",\"41576\",\"static/chunks/41576-SPANIDPLACEHOLD0.js\",\"46758\",\"static/chunks/46758-SPANIDPLACEHOLD0.js\",\"24345\",\"static/chunks/app/not-found-SPANIDPLACEHOLD0.js\"],\"default\"]\n6:I[40523,[],\"OutletBoundary\"]\n8:I[91962,[],\"AsyncMetadataOutlet\"]\na:I[40523,[],\"ViewportBoundary\"]\nc:I[40523,[],\"MetadataBoundary\"]\nd:\"$Sreact.suspense\"\nf:I[89146,[],\"\"]\n10:I[83940,[\"77190\",\"static/chunks/271a3146-SPANIDPLACEHOLD0.js\",\"817\",\"static/chunks/817-SPANIDPLACEHOLD0.js\",\"38\",\"static/chunks/38-SPANIDPLACEHOLD0.js\",\"49616\",\"static/chunks/49616-SPANIDPLACEHOLD0.js\",\"41576\",\"static/chunks/41576-SPANIDPLACEHOLD0.js\",\"7177\",\"static/chunks/app/layout-SPANIDPLACEHOLD0.js\"],\"default\"]\n11:I[87232,[\"817\",\"static/chunks/817-SPANIDPLACEHOLD0.js\",\"49616\",\"static/chunks/49616-SPANIDPLACEHOLD0.js\",\"41576\",\"static/chunks/41576-SPANIDPLACEHOLD0.js\",\"46758\",\"static/chunks/46758-SPANIDPLACEHOLD0.js\",\"18039\",\"static/chunks/app/error-SPANIDPLACEHOLD0.js\"],\"default\"]\n:HL[\"/_next/static/media/SPANIDPLACEHOLD0-s.p.woff2\",\"font\",{\"crossOrigin\":\"\",\"nonce\":\"FJqcHY2E4/6SC0sw9UuUFQ==\",\"type\":\"font/woff2\"}]\n:HL[\"/_next/static/css/SPANIDPLACEHOLD0.css\",\"style\",{\"nonce\":\"FJqcHY2E4/6SC0sw9UuUFQ==\"}]\n:HL[\"/_next/static/css/SPANIDPLACEHOLD0.css\",\"style\",{\"nonce\":\"FJqcHY2E4/6SC0sw9UuUFQ==\"}]\n:HL[\"/_next/static/css/SPANIDPLACEHOLD0.css\",\"style\",{\"nonce\":\"FJqcHY2E4/6SC0sw9UuUFQ==\"}]\n:HL[\"/_next/static/css/SPANIDPLACEHOLD0.css\",\"style\",{\"nonce\":\"FJqcHY2E4/6SC0sw9UuUFQ==\"}]\n"])</script><script nonce="NONCEPLACEHOLDER==">self.__next_f.push([1,"0:{\"P\":null,\"b\":\"GO6Ke_9BcWtiEkKx-r516\",\"p\":\"\",\"c\":[\"\",\"jobs\",\"list_DOESNOTEXIST000000\",\"nope\"],\"i\":false,\"f\":[[[\"\",{\"children\":[\"/_not-found\",{\"children\":[\"__PAGE__\",{}]}]},\"$undefined\",\"$undefined\",true],[\"\",[\"$\",\"$1\",\"c\",{\"children\":[[[\"$\",\"link\",\"0\",{\"rel\":\"stylesheet\",\"href\":\"/_next/static/css/SPANIDPLACEHOLD0.css\",\"precedence\":\"next\",\"crossOrigin\":\"$undefined\",\"nonce\":\"FJqcHY2E4/6SC0sw9UuUFQ==\"}],[\"$\",\"link\",\"1\",{\"rel\":\"stylesheet\",\"href\":\"/_next/static/css/SPANIDPLACEHOLD0.css\",\"precedence\":\"next\",\"crossOrigin\":\"$undefined\",\"nonce\":\"FJqcHY2E4/6SC0sw9UuUFQ==\"}],[\"$\",\"link\",\"2\",{\"rel\":\"stylesheet\",\"href\":\"/_next/static/css/SPANIDPLACEHOLD0.css\",\"precedence\":\"next\",\"crossOrigin\":\"$undefined\",\"nonce\":\"FJqcHY2E4/6SC0sw9UuUFQ==\"}],[\"$\",\"link\",\"3\",{\"rel\":\"stylesheet\",\"href\":\"/_next/static/css/SPANIDPLACEHOLD0.css\",\"precedence\":\"next\",\"crossOrigin\":\"$undefined\",\"nonce\":\"FJqcHY2E4/6SC0sw9UuUFQ==\"}]],\"$L2\"]}],{\"children\":[\"/_not-found\",[\"$\",\"$1\",\"c\",{\"children\":[null,[\"$\",\"$L3\",null,{\"parallelRouterKey\":\"children\",\"error\":\"$undefined\",\"errorStyles\":\"$undefined\",\"errorScripts\":\"$undefined\",\"template\":[\"$\",\"$L4\",null,{}],\"templateStyles\":\"$undefined\",\"templateScripts\":\"$undefined\",\"notFound\":\"$undefined\",\"forbidden\":\"$undefined\",\"unauthorized\":\"$undefined\"}]]}],{\"children\":[\"__PAGE__\",[\"$\",\"$1\",\"c\",{\"children\":[[\"$\",\"$L5\",null,{\"statusCode\":404}],null,[\"$\",\"$L6\",null,{\"children\":[\"$L7\",[\"$\",\"$L8\",null,{\"promise\":\"$@9\"}]]}]]}],{},null,false]},null,false]},null,false],[\"$\",\"$1\",\"h\",{\"children\":[[\"$\",\"meta\",null,{\"name\":\"robots\",\"content\":\"noindex\"}],[[\"$\",\"$La\",null,{\"children\":\"$Lb\"}],[\"$\",\"meta\",null,{\"name\":\"next-size-adjust\",\"content\":\"\"}]],[\"$\",\"$Lc\",null,{\"children\":[\"$\",\"div\",null,{\"hidden\":true,\"children\":[\"$\",\"$d\",null,{\"fallback\":null,\"children\":\"$Le\"}]}]}]]}],false]],\"m\":\"$undefined\",\"G\":[\"$f\",[]],\"s\":false,\"S\":false}\n"])</script><script nonce="NONCEPLACEHOLDER==">self.__next_f.push([1,"2:[\"$\",\"html\",null,{\"lang\":\"en\",\"translate\":\"no\",\"data-scroll-behavior\":\"smooth\",\"children\":[[\"$\",\"head\",null,{\"children\":[[\"$\",\"script\",null,{\"nonce\":\"FJqcHY2E4/6SC0sw9UuUFQ==\",\"suppressHydrationWarning\":true,\"dangerouslySetInnerHTML\":{\"__html\":\"if(self.trustedTypes\u0026\u0026self.trustedTypes.createPolicy)self.trustedTypes.createPolicy('default',{createHTML:function(s){return s},createScript:function(s){return s},createScriptURL:function(s){return s}})\"}}],[\"$\",\"link\",null,{\"rel\":\"preconnect\",\"href\":\"https://www.clarity.ms\",\"crossOrigin\":\"\"}],[\"$\",\"link\",null,{\"rel\":\"preconnect\",\"href\":\"https://identitytoolkit.googleapis.com\",\"crossOrigin\":\"\"}],[\"$\",\"link\",null,{\"rel\":\"preconnect\",\"href\":\"https://jotrack.s3.amazonaws.com\",\"crossOrigin\":\"\"}],[\"$\",\"link\",null,{\"rel\":\"preconnect\",\"href\":\"https://connect.facebook.net\",\"crossOrigin\":\"\"}],[\"$\",\"script\",null,{\"type\":\"application/ld+json\",\"dangerouslySetInnerHTML\":{\"__html\":\"{\\\"@context\\\":\\\"https://schema.org\\\",\\\"@type\\\":\\\"Organization\\\",\\\"name\\\":\\\"Mercor\\\",\\\"url\\\":\\\"https://work.mercor.com\\\",\\\"logo\\\":\\\"https://work.mercor.com/logo.png\\\",\\\"description\\\":\\\"We use AI to understand human ability and match talent with the opportunities they're best suited for.\\\",\\\"contactPoint\\\":{\\\"@type\\\":\\\"ContactPoint\\\",\\\"email\\\":\\\"support@mercor.com\\\",\\\"contactType\\\":\\\"Customer Support\\\",\\\"areaServed\\\":\\\"Worldwide\\\",\\\"availableLanguage\\\":[\\\"English\\\"]},\\\"sameAs\\\":[\\\"https://www.linkedin.com/company/mercor-ai/\\\",\\\"https://twitter.com/mercor\\\",\\\"https://www.facebook.com/MercorSoftware/\\\"],\\\"address\\\":{\\\"@type\\\":\\\"PostalAddress\\\",\\\"streetAddress\\\":\\\"181 Fremont St\\\",\\\"addressLocality\\\":\\\"San Francisco\\\",\\\"addressRegion\\\":\\\"CA\\\",\\\"postalCode\\\":\\\"94105\\\",\\\"addressCountry\\\":\\\"US\\\"},\\\"foundingDate\\\":\\\"2023\\\",\\\"knowsAbout\\\":[\\\"Talent Acquisition\\\",\\\"Remote Work\\\",\\\"AI-powered Recruitment\\\",\\\"Global Hiring\\\",\\\"Technical Recruiting\\\",\\\"Software Development\\\"]}\"}}]]}],[\"$\",\"body\",null,{\"className\":\"__className_8b3a0b\",\"translate\":\"no\",\"children\":[[\"$\",\"$L10\",null,{\"nonce\":\"FJqcHY2E4/6SC0sw9UuUFQ==\",\"hasAuthCookie\":false,\"children\":[\"$\",\"$L3\",null,{\"parallelRouterKey\":\"children\",\"error\":\"$11\",\"errorStyles\":[],\"errorScripts\":[],\"template\":[\"$\",\"$L4\",null,{}],\"templateStyles\":\"$undefined\",\"templateScripts\":\"$undefined\",\"notFound\":[[\"$\",\"$L5\",null,{\"statusCode\":404}],[]],\"forbidden\":\"$undefined\",\"unauthorized\":\"$undefined\"}]}],[\"$\",\"div\",null,{\"id\":\"modal-root\"}]]}]]}]\n"])</script><script nonce="NONCEPLACEHOLDER==">self.__next_f.push([1,"b:[[\"$\",\"meta\",\"0\",{\"charSet\":\"utf-8\"}],[\"$\",\"meta\",\"1\",{\"name\":\"viewport\",\"content\":\"width=device-width, initial-scale=1, viewport-fit=cover\"}]]\n7:null\n9:{\"metadata\":[[\"$\",\"meta\",\"0\",{\"name\":\"robots\",\"content\":\"noindex, nofollow\"}]],\"error\":null,\"digest\":\"$undefined\"}\ne:\"$9:metadata\"\n"])</script><script nonce="NONCEPLACEHOLDER==">(function(){function c(){var b=a.contentDocument||(a.contentWindow&&a.contentWindow.document);if(b){var d=b.createElement('script');d.nonce='FJqcHY2E4/6SC0sw9UuUFQ==';d.innerHTML="window.__CF$cv$params={r:'SPANIDPLACEHOLD0',t:'MTc4OTcxNDYxNg=='};var a=document.createElement('script');a.nonce='FJqcHY2E4/6SC0sw9UuUFQ==';a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script></body></html>'''
 
 # A hypothetical Cloudflare challenge. Mercor has never served one to this
 # scraper — every route answered 200 on 2026-09-18 — so this is BUILT rather
@@ -627,6 +645,104 @@ def check_unsupported_urls_are_refused_with_a_reason():
     check("an empty URL is refused with a reason", not ok and bool(why))
 
 
+def check_every_engine_threads_an_http_status_to_the_classifier():
+    """§8: on this site the status is very nearly the ONLY signal.
+
+    Measured live 2026-09-18 against a withdrawn job:
+
+        goto() status                404
+        classified WITH the status   not_found      (correct)
+        classified without it        empty          (what all three did)
+
+    There is no body marker to fall back on. The live 404 carries
+    `__NEXT_DATA__` like every other page, and the string "404" appears 1
+    and 2 times on the two 404s against **7 and 17 on the two good pages** —
+    so the obvious marker points the wrong way. Every other candidate was 0
+    on all four pages.
+
+    `empty` is a claim that the site served an answer with nothing in it.
+    About a listing that is simply gone that is both wrong and quieter than
+    it should be, and `--mode job` meets it routinely: the enumeration is
+    built before any of its 462 addresses is fetched, so a job withdrawn in
+    between lands exactly here.
+
+    Pinned per engine because a fix that reaches two of three twins is the
+    drift `page_flow` exists to prevent — and Selenium is the one that has
+    to work for it, since `driver.get()` returns None and WebDriver exposes
+    no status at all.
+    """
+    for module in ENGINES:
+        path = os.path.join(HERE, module + ".py")
+        if not os.path.exists(path):
+            continue
+        src = open(path, encoding="utf-8").read()
+        check("%s binds an HTTP status from its navigation" % module,
+              "http_status" in src,
+              "nothing captures what the navigation returned")
+        # and actually hands it over, rather than binding it and passing None
+        check("%s passes that status to the classifier" % module,
+              re.search(r'classify\([^)]*http_status', src)
+              or re.search(r'_classify\([^)]*status=http_status', src),
+              "the status is bound but the classifier still gets None")
+        # NOT `classify\([^)]*mode=` — Selenium's call contains
+        # `d["current_url"]()`, whose own ")" ends the character class and
+        # makes the check fail on correct code. Matching the whole call
+        # across newlines is what actually works.
+        check("%s tells the classifier which mode it is in" % module,
+              re.search(r'_?classify\(.{0,200}?mode=args\.mode', src, re.S),
+              "without the mode, a detail page is judged as if it were a "
+              "listing and a perfectly good job reads as empty")
+
+    # Selenium cannot get a status from WebDriver, so it must read one out
+    # of Chrome's performance log — and must have asked for that log.
+    sel = os.path.join(HERE, "selenium_scraper.py")
+    if os.path.exists(sel):
+        src = open(sel, encoding="utf-8").read()
+        check("selenium asks Chrome for the performance log",
+              'goog:loggingPrefs' in src,
+              "without it there is no status available to this engine at all")
+        check("...and matches the document entry to the URL it requested",
+              "_document_status" in src and 'response.get("url")' in src,
+              "taking the last Document entry reports 200 for a 404, because "
+              "the log also carries the /login page Mercor bounces to")
+
+
+def check_a_withdrawn_listing_is_not_an_empty_one():
+    """The cross-engine fallback: Mercor bounces a dead address to /login.
+
+    `/jobs/list_DEAD/gone` answers 404 and the client then redirects to
+    `/login?redirect=%2Fjobs%2Flist_DEAD%2Fgone`. A live job stays on its
+    own URL. That is readable from the FINAL url alone, so it works in the
+    engine that has no status to thread.
+    """
+    from product_parser import bounced_to_login, detect_page_state
+    LOGIN = ("https://work.mercor.com/login?redirect="
+             "%2Fjobs%2Flist_AAABoDEAD%2Fgone")
+    JOB = "https://work.mercor.com/jobs/list_AAABoGhh/x"
+    check("a login bounce is recognised", bounced_to_login(LOGIN))
+    check("a job URL is not", not bounced_to_login(JOB))
+    check("the index is not", not bounced_to_login("https://work.mercor.com/explore"))
+    # A 404 status alone settles it, with or without a marker.
+    equal("a 404 is not_found whatever the body says",
+          detect_page_state("<html><body>anything</body></html>", 404, JOB, "job"),
+          "not_found")
+    # ...and so does the bounce, with no status at all — the Selenium case.
+    equal("a login bounce is not_found with NO status",
+          detect_page_state("<html><body>anything</body></html>", None, LOGIN, "job"),
+          "not_found")
+    # And neither may fire on a page that really is content.
+    equal("a real page is still content",
+          detect_page_state(DETAIL_HTML, 200,
+                            "https://work.mercor.com/jobs/list_X/y", "job"),
+          "content")
+    # not_found must not retry: re-fetching an address that will never exist
+    # again spends a fetch and a debug dump for nothing.
+    import page_flow
+    check("not_found is not retried", not page_flow.should_retry("not_found"))
+    check("...and is not counted as blocked",
+          not page_flow.counts_as_blocked("not_found"))
+
+
 def check_page_states_on_real_captures():
     """§17: order the signals by how much they PROVE, not by how cheap they
     are. A payload with records in it is content, and nothing overrides it.
@@ -642,8 +758,24 @@ def check_page_states_on_real_captures():
           "content")
     equal("a 404 is not_found, not blocked",
           detect_page_state(NOT_FOUND_HTML, 404, "", "job"), "not_found")
-    equal("...and is recognised from the body even without a status",
-          detect_page_state(NOT_FOUND_HTML, None, "", "job"), "not_found")
+    # And the reason that status is not optional: the body carries NOTHING
+    # to fall back on. Asserted rather than assumed, because the previous
+    # version of this fixture was hand-written and contained text the site
+    # has never served.
+    check("the real 404 body carries no 'Page not found' text",
+          "Page not found" not in NOT_FOUND_HTML)
+    check("...and its visible text is empty",
+          not re.sub(r"<[^>]+>", "", re.sub(r"<script.*?</script>", "",
+                     NOT_FOUND_HTML, flags=re.S)).strip())
+    check("...so without a status it cannot be recognised from the body",
+          detect_page_state(NOT_FOUND_HTML, None, "", "job") != "not_found",
+          "if this ever passes, the site started saying something and the "
+          "fallback is worth having again")
+    # The browser path has the other signal instead.
+    equal("...but a login bounce settles it with no status at all",
+          detect_page_state(NOT_FOUND_HTML, None,
+                            "https://work.mercor.com/login?redirect=%2Fjobs%2Fx",
+                            "job"), "not_found")
     equal("a challenge is blocked",
           detect_page_state(SYNTHETIC_CHALLENGE_HTML, 403, "", "listings"),
           "blocked")

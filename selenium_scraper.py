@@ -62,6 +62,7 @@ and warned about rather than silently ignored.
 """
 
 import argparse
+import json
 import logging
 import re
 import sys
@@ -257,6 +258,17 @@ class _Session:
 
     def open(self):
         options = Options()
+        # The ONLY way this engine can learn an HTTP status. `driver.get()`
+        # returns None and WebDriver exposes no status anywhere, while on
+        # this site the status is very nearly the only thing separating a
+        # withdrawn listing from a page with nothing on it. Chrome's
+        # performance log carries `Network.responseReceived`, and the
+        # document entry whose url matches the request carries `status`.
+        #
+        # Without this, two engines would be better informed than the third
+        # about whether a listing still exists — and a fix that reaches two
+        # of three twins is the drift `page_flow` exists to prevent.
+        options.set_capability("goog:loggingPrefs", {"performance": "ALL"})
         if self.remote:
             options.debugger_address = _cdp_host_port(self.args.cdp_endpoint)
             logger.info("Attaching to an existing browser at %s.",
@@ -563,6 +575,44 @@ def _snapshot(session, url: str):
     return _driver(session)["content"]()
 
 
+def _document_status(session, url: str):
+    """The HTTP status Chrome recorded for the document at `url`, or None.
+
+    Reads `Network.responseReceived` out of the performance log and takes
+    the entry whose own url matches the one requested. Matching matters:
+    the log also carries the reCAPTCHA anchor iframe (200) and, on a dead
+    job, the `/login` page Mercor bounces to (200). Taking the last
+    Document entry instead of the matching one reports 200 for a 404 —
+    which is what the first version of this did, measured against a URL
+    `curl` had already confirmed as 404.
+
+    Returns None rather than raising if logging is unavailable: an older
+    chromedriver, a non-Chrome driver, or a remote endpoint that does not
+    grant logs. The caller then falls back to `bounced_to_login`, which
+    needs no status.
+    """
+    try:
+        entries = session.driver.get_log("performance")
+    except Exception:  # noqa: BLE001 - no logs is not a run-ending problem
+        return None
+    wanted = (url or "").split("#")[0]
+    status = None
+    for entry in entries:
+        try:
+            msg = json.loads(entry.get("message", "{}")).get("message", {})
+        except (ValueError, TypeError):
+            continue
+        if msg.get("method") != "Network.responseReceived":
+            continue
+        params = msg.get("params") or {}
+        if params.get("type") != "Document":
+            continue
+        response = params.get("response") or {}
+        if (response.get("url") or "").split("#")[0] == wanted:
+            status = response.get("status")
+    return status
+
+
 def _fetch_page_source(session, url: str, timeout_ms: int = 60000) -> str:
     """Navigate and return the serialised document. Used for enumeration.
 
@@ -706,9 +756,17 @@ def _fetch_one_page(session, args, pool, page_num: int, url: str) -> PageOutcome
     for block_attempt in range(block_retries + 1):
         logger.info("Fetching page %d/%d: %s", page_num, args.pages, url)
         load_failed, exit_failed = False, None
+        http_status = None
         for attempt in range(1, args.retries + 1):
             try:
+                # Drain anything from a previous navigation first, or the
+                # status read afterwards can belong to the last page.
+                try:
+                    session.driver.get_log("performance")
+                except Exception:  # noqa: BLE001
+                    pass
                 session.driver.get(url)
+                http_status = _document_status(session, url)
                 load_failed = False
                 break
             except (TimeoutException, WebDriverException) as e:
@@ -748,7 +806,8 @@ def _fetch_one_page(session, args, pool, page_num: int, url: str) -> PageOutcome
                         "already made for it and SOLVES_PER_PAGE is %d.",
                         page_num, solves_bought, page_flow.SOLVES_PER_PAGE)
         html = _snapshot(session, url) or ""
-        state = page_flow.classify(html, None, d["current_url"]())
+        state = page_flow.classify(html, http_status, d["current_url"](),
+                                   mode=args.mode)
 
         # Mercor server-renders its payload, so a page is parseable in the
         # FIRST response and there is nothing to wait for on a healthy page.
@@ -770,7 +829,8 @@ def _fetch_one_page(session, args, pool, page_num: int, url: str) -> PageOutcome
                 logger.info("Still nothing after %.0fs (%d match(es) for %s).",
                             wait_ms / 1000.0, found, sel)
             html = _snapshot(session, url) or html
-            state = page_flow.classify(html, None, d["current_url"]())
+            state = page_flow.classify(html, http_status, d["current_url"](),
+                                       mode=args.mode)
 
         # The paid path is reached only for state "challenge" — Cloudflare's
         # Managed Challenge, which IS a test. It is NOT reached for
@@ -783,7 +843,8 @@ def _fetch_one_page(session, args, pool, page_num: int, url: str) -> PageOutcome
             if handle_captcha_if_present(session, args):
                 time.sleep(1)
                 html = d["content"]() or html
-                state = page_flow.classify(html, url=d["current_url"]())
+                state = page_flow.classify(html, http_status,
+                                           d["current_url"](), mode=args.mode)
                 if state == "content":
                     logger.info("The solve was accepted — page %d is content "
                                 "now.", page_num)

@@ -1393,11 +1393,52 @@ def site_turnstile_sitekey(html: Optional[str]) -> Optional[str]:
     return None
 
 
-# Mercor's 404 body, in the site's own words. An unambiguous positive
-# signal that this route does not exist — not a heuristic — so
-# `detect_page_state` may trust it. Checked against both 404 captures
-# (a non-existent listing id and a non-existent route).
-_NOT_FOUND_MARKERS = ("Page not found", "404")
+# How a dead address announces itself on this site, and it is NOT a body
+# marker — measured in a live browser 2026-09-18, there is no such thing
+# here.
+#
+# Two things had to be measured before this could be written, and both
+# contradicted the raw `curl` capture this repo started from:
+#
+#   * The live 404 page carries `__NEXT_DATA__` like every other page, so
+#     "no payload" does not distinguish it. Only the curl capture lacked
+#     one.
+#   * There is no text that does either. Counted on four live pages, the
+#     string "404" appears 1 and 2 times on the two 404s and **7 and 17
+#     times on the two GOOD pages** — so the obvious marker points the
+#     wrong way, which is §18 for the third time in this file. Every other
+#     candidate ("Page not found", "This page could not be found",
+#     "notFound", "next-error") was 0 on all four.
+#
+# What DOES distinguish a dead address is that Mercor bounces it to its
+# login screen: `/jobs/list_DEAD/gone` answers HTTP 404 and then the client
+# redirects to `/login?redirect=%2Fjobs%2Flist_DEAD%2Fgone`, while a live
+# job stays on its own URL. Both 404 captures did this; neither good page
+# did.
+#
+# So the HTTP STATUS is the primary signal and this is the cross-engine
+# fallback, which matters because Selenium's `driver.get()` returns no
+# status at all: without something a URL alone can carry, two engines would
+# be better informed than the third about whether a listing still exists.
+_LOGIN_BOUNCE_RE = re.compile(r"^/login(?:[/?]|$)", re.I)
+
+
+def bounced_to_login(url: str) -> bool:
+    """Whether a fetch ended on the login screen rather than the page asked for.
+
+    On this site that is what a dead or withdrawn address does. It is read
+    from the FINAL url, so a caller must pass the address the browser ended
+    on rather than the one it asked for.
+
+    Deliberately NOT treated as "blocked": nothing is challenging us and a
+    different exit would change nothing. It is also not treated as `empty`,
+    which is what it classified as before this existed — and `empty` is a
+    claim that the site served an answer with nothing in it, which is a
+    different and wronger thing to record about a listing that is simply
+    gone.
+    """
+    _, _, path, _ = _split_url(url or "")
+    return bool(_LOGIN_BOUNCE_RE.match(path))
 
 
 def detect_page_state(html: Optional[str], status: Optional[int] = None,
@@ -1451,8 +1492,16 @@ def detect_page_state(html: Optional[str], status: Optional[int] = None,
     # refused request with 403, 429 or 503 and never with 404, so a 404 is
     # the origin itself saying this route does not exist — strictly more
     # proof than a substring, which is the ordering §17 asks for.
-    if status == 404 or (payload is None and status in (None, 200)
-                         and all(m in text for m in _NOT_FOUND_MARKERS)):
+    #
+    # The status is the PRIMARY signal and on this site it is very nearly
+    # the only one, so an engine that discards it reports a dead listing as
+    # `empty`. All three thread it now; `smoke_test.py` pins that.
+    if status == 404:
+        return "not_found"
+    # The cross-engine fallback, for Selenium — which has no status to
+    # thread, because WebDriver exposes none. A fetch that ended on the
+    # login screen did not get the page it asked for.
+    if bounced_to_login(url):
         return "not_found"
 
     marker = detect_bot_challenge(text)

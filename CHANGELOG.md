@@ -110,6 +110,22 @@ Four traps cost real time here and are pinned by tests so they stay fixed:
   same Next.js app and references `/_next/static` *more* than a real page
   does. `detect_page_state` leads with the presence of `__NEXT_DATA__`
   instead, which the 404 carries none of.
+- **The HTTP status must reach the classifier, and here it is nearly the
+  only signal.** All three engines discarded what the navigation returned,
+  so a withdrawn listing classified as `empty` — a claim that the site
+  served an answer with nothing in it, about a job that is simply gone.
+  `--mode job` meets this routinely: the enumeration is built before any of
+  its 462 addresses is fetched. There is no body to fall back on — the live
+  404 carries `__NEXT_DATA__` like any other page, its visible text is the
+  empty string, and "404" appears *more* on good pages (7 and 17) than on
+  the 404s (1 and 2). Playwright and pyppeteer now bind `goto()`'s response;
+  Selenium reads Chrome's performance log, because `driver.get()` returns
+  None and WebDriver exposes no status at all. The cross-engine fallback is
+  that Mercor bounces a dead address to `/login?redirect=…`, which is
+  readable from the final URL alone.
+- **The mirrors never told the classifier which mode they were in**, so a
+  `--mode job` detail page was judged as if it were a listing. It worked by
+  luck, because `empty` still parses.
 - **`diff_runs.TRACKED_FIELDS` must name columns that exist.** Ported
   verbatim it named 25 fields of which this row class has four, so the diff
   compared nothing: a listing whose rate went 100 → 999 with its status

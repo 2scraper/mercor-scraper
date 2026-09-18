@@ -808,10 +808,16 @@ def _fetch_one_page(session, args, pool, page_num: int, url: str) -> PageOutcome
         # branch below reports it, and three engines that structure this
         # differently drift (CLAUDE.md §6).
         load_failed, exit_failed = False, None
+        # See the Playwright engine: the HTTP status is very nearly the only
+        # signal that separates a withdrawn listing from an empty page here,
+        # so it is bound and passed on rather than discarded.
+        http_status = None
         for attempt in range(1, args.retries + 1):
             try:
-                bridge.run(page.goto(url, {"waitUntil": "domcontentloaded",
-                                           "timeout": 60000}))
+                response = bridge.run(page.goto(url, {"waitUntil": "domcontentloaded",
+                                                     "timeout": 60000}))
+                if response is not None:
+                    http_status = getattr(response, "status", None)
                 load_failed = False
                 break
             except Exception as e:  # noqa: BLE001 — pyppeteer raises many types
@@ -855,7 +861,7 @@ def _fetch_one_page(session, args, pool, page_num: int, url: str) -> PageOutcome
                         "already made for it and SOLVES_PER_PAGE is %d.",
                         page_num, solves_bought, page_flow.SOLVES_PER_PAGE)
         html = _snapshot(session, url) or ""
-        state = page_flow.classify(html, None, page.url)
+        state = page_flow.classify(html, http_status, page.url, mode=args.mode)
 
         # Mercor server-renders its payload, so a page is parseable
         # in the FIRST response. The wait below is only for the state that
@@ -877,7 +883,7 @@ def _fetch_one_page(session, args, pool, page_num: int, url: str) -> PageOutcome
                 logger.info("Still nothing after %.0fs (%d match(es) for %s).",
                             wait_ms / 1000.0, found, sel)
             html = _snapshot(session, url) or html
-            state = page_flow.classify(html, None, page.url)
+            state = page_flow.classify(html, http_status, page.url, mode=args.mode)
 
         # The paid path is reached only for state "challenge" — Cloudflare's
         # Managed Challenge, which IS a test. It is NOT reached for
@@ -894,7 +900,8 @@ def _fetch_one_page(session, args, pool, page_num: int, url: str) -> PageOutcome
             if handle_captcha_if_present(session, args):
                 time.sleep(1)
                 html = _content(session) or html
-                state = page_flow.classify(html, url=page.url)
+                state = page_flow.classify(html, http_status, page.url,
+                                           mode=args.mode)
                 if state == "content":
                     logger.info("The solve was accepted — page %d is content "
                                 "now.", page_num)

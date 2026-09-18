@@ -1015,9 +1015,20 @@ def _fetch_one_page(session, args, pool, page_num: int, url: str) -> PageOutcome
         # Retry a navigation timeout rather than ending the run on it. One
         # network flap on page 12 of 50 should not break the loop.
         load_failed, exit_failed = False, None
+        # The navigation's own HTTP status, which MUST reach the classifier.
+        # On this site it is very nearly the only thing that distinguishes a
+        # withdrawn listing from a page with nothing on it: the live 404
+        # carries `__NEXT_DATA__` like any other page, and the string "404"
+        # appears MORE often on good pages than on the 404 itself. Discarding
+        # what `goto()` returns — which this engine did — reported a dead job
+        # as `empty`.
+        http_status = None
         for attempt in range(1, args.retries + 1):
             try:
-                session.page.goto(url, wait_until="domcontentloaded", timeout=60000)
+                response = session.page.goto(url, wait_until="domcontentloaded",
+                                             timeout=60000)
+                if response is not None:
+                    http_status = response.status
                 load_failed = False
                 break
             except (PWTimeout, PWError) as e:
@@ -1064,7 +1075,7 @@ def _fetch_one_page(session, args, pool, page_num: int, url: str) -> PageOutcome
                         page_flow.SOLVES_PER_PAGE)
 
         html = _snapshot(session.page, url) or ""
-        state = _classify(session.page, html, mode=args.mode)
+        state = _classify(session.page, html, status=http_status, mode=args.mode)
 
         # Mercor server-renders its payload into `__NEXT_DATA__`, so a page
         # is parseable in the FIRST response and there is nothing to wait
@@ -1093,7 +1104,7 @@ def _fetch_one_page(session, args, pool, page_num: int, url: str) -> PageOutcome
                 logger.info("Still nothing after %.0fs (%d match(es) for %s).",
                             wait_timeout / 1000, found, _ready_selector(args))
             html = _snapshot(session.page, url) or html
-            state = _classify(session.page, html, mode=args.mode)
+            state = _classify(session.page, html, status=http_status, mode=args.mode)
 
         # The paid path is reached only for state "challenge" — Cloudflare's
         # managed challenge, which IS a test and can be solved once
@@ -1107,7 +1118,7 @@ def _fetch_one_page(session, args, pool, page_num: int, url: str) -> PageOutcome
             if handle_captcha_if_present(session.page, args):
                 session.page.wait_for_timeout(1000)
                 html = _snapshot(session.page, url) or html
-                state = _classify(session.page, html, mode=args.mode)
+                state = _classify(session.page, html, status=http_status, mode=args.mode)
                 # The VERIFIED outcome, and the only one worth reporting: a
                 # "ready" task result is not evidence the token works. This
                 # line is what says whether the money bought anything.
