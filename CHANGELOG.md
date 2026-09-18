@@ -64,12 +64,18 @@ this run. The ones that shaped the design:
   `?domain=` each returned a byte-identical payload, so `page_url()` returns
   None by design rather than manufacturing an address the site does not
   honour.
-- **Mercor runs reCAPTCHA v3 Enterprise on every page** — invisible, found
-  through `___grecaptcha_cfg` at runtime. Its sitekey is in no served HTML
-  and in none of the eagerly-loaded JS bundles, so a static grep for the
-  site's own captcha config finds nothing; only a real browser reveals it.
-  It never renders a challenge and must never be paid for, which
-  `--solve-captcha when-blocked` (the default) enforces.
+- **The marketplace host runs invisible reCAPTCHA Enterprise; the corporate
+  host runs none.** `work.mercor.com` loads `enterprise.js` and an anchor
+  iframe (`size=invisible`, sitekey
+  `6LcUUCgsAAAAAD_LMM5QDj1qUwsfKYDbNKa0v5wO`) on the index, on detail pages
+  and on its 404s; `www.mercor.com` and `/careers` load zero captcha
+  requests and zero iframes. Its sitekey is in no served HTML and in none of
+  the eagerly-loaded JS bundles, so a static grep for the site's own captcha
+  config finds nothing — only a real browser reveals it. No challenge frame
+  was rendered on any route on any run, so it never blocks and must never be
+  paid for, which `--solve-captcha when-blocked` (the default) enforces. The
+  variant is inferred rather than confirmed: invisible with no challenge
+  frame reads as v3, but an unchallenging v2-invisible looks identical.
 - **Pay is not all hourly**: `hourly` 347, `per-task` 31, `one-time` 9,
   `yearly` 3 across the 390. And `commitment` is a different axis from
   `rate_period` — a task-based commitment can still be paid hourly, and 31

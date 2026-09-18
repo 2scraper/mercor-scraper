@@ -139,8 +139,11 @@ that breaks one will fail rather than silently regress:
 
   Before adding any marker: count it on a page you know is good.
 
-- **Mercor's own captcha IS configured, and a capture cannot see it.**
-  reCAPTCHA **v3 Enterprise**, sitekey
+- **Mercor's own captcha IS configured on the marketplace host, and a
+  capture cannot see it.** `www.mercor.com` runs none at all — measured in
+  a live browser, zero captcha requests on the home page and on `/careers`
+  — so this applies to `--mode listings` and `--mode job` only.
+  Invisible reCAPTCHA **Enterprise**, sitekey
   `6LcUUCgsAAAAAD_LMM5QDj1qUwsfKYDbNKa0v5wO`, `size=invisible`, found
   through `___grecaptcha_cfg` on the first live run. The sitekey is in no
   served HTML and in none of the eagerly-loaded JS bundles — it arrives in a

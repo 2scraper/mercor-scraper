@@ -23,13 +23,33 @@ User-Agent, and twelve rapid sequential detail fetches were all 200 at about
 But "no challenge rendered" is NOT "no captcha configured" (CLAUDE.md §18),
 and on this site that distinction has teeth:
 
-  * **Mercor runs reCAPTCHA v3 Enterprise on every page.** Sitekey
-    `6LcUUCgsAAAAAD_LMM5QDj1qUwsfKYDbNKa0v5wO`, `size=invisible`,
-    discovered through `___grecaptcha_cfg` on the first live run of the
-    Playwright engine. A v3 widget renders no challenge frame at all — it
-    scores the session in the background — so it never blocks a fetch and
-    must never be paid for. `--solve-captcha when-blocked` is the default
-    precisely so it is not.
+  * **The MARKETPLACE host runs invisible reCAPTCHA Enterprise; the
+    CORPORATE host runs none.** Measured in a live browser 2026-09-18, and
+    the split is the part worth carrying:
+
+        work.mercor.com/explore        enterprise.js + anchor, size=invisible
+        work.mercor.com/jobs/{id}/…    same
+        work.mercor.com 404s           same
+        www.mercor.com/careers         NOTHING — 0 captcha requests
+        www.mercor.com (home)          NOTHING
+
+    Sitekey `6LcUUCgsAAAAAD_LMM5QDj1qUwsfKYDbNKa0v5wO`, from
+    `/recaptcha/enterprise/anchor?...&size=invisible`. So `--mode careers`
+    meets no captcha at all.
+
+    No `bframe` challenge iframe was rendered on any route on any run: it
+    scores the session in the background rather than testing it, so it
+    never blocks a fetch and must never be paid for. `--solve-captcha
+    when-blocked` is the default precisely so it is not.
+
+    The VARIANT is inferred rather than confirmed. `size=invisible`, no
+    challenge frame and no `render=explicit` reads as v3, which is what
+    `detect_recaptcha_in_page` classifies it as — but a v2-invisible that
+    never challenged is indistinguishable from outside. Nothing depends on
+    it here because no solve is attempted; it matters to anyone who starts
+    solving, since §8 is explicit that v3 parameters sent for a
+    v2-invisible widget buy a token the site rejects. Settle it against a
+    real challenge before building a task.
 
     What makes it worth this paragraph is where it is NOT: the sitekey
     appears in no served HTML and in none of the eagerly-loaded JS chunks.

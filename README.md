@@ -249,20 +249,42 @@ Mercor has **never rendered a challenge** to this scraper. But "no challenge
 rendered" is not "no captcha configured", and on this site the distinction
 has teeth.
 
-**Mercor runs reCAPTCHA v3 Enterprise on every page.** Sitekey
-`6LcUUCgsAAAAAD_LMM5QDj1qUwsfKYDbNKa0v5wO`, `size=invisible`, discovered
-through `___grecaptcha_cfg` on the first live run of the Playwright engine.
+**The marketplace host runs invisible reCAPTCHA Enterprise. The corporate
+host runs nothing.** Measured in a live browser on 2026-09-18:
 
-Two things about it matter:
+| Route | reCAPTCHA |
+|---|---|
+| `work.mercor.com/explore` | **yes** — `enterprise.js`, anchor iframe, `size=invisible` |
+| `work.mercor.com/jobs/{id}/{slug}` | **yes** — same |
+| `work.mercor.com` 404 pages | **yes** — same |
+| `www.mercor.com/careers` | **none** — zero captcha requests, zero iframes |
+| `www.mercor.com` (home) | **none** |
+
+Sitekey `6LcUUCgsAAAAAD_LMM5QDj1qUwsfKYDbNKa0v5wO`, loaded from
+`https://www.google.com/recaptcha/enterprise/anchor?...&size=invisible`.
+So `--mode careers` runs past no captcha at all, and the other two modes
+run past one that never stops them.
+
+Three things about it matter:
 
 1. **It is invisible to a capture.** The sitekey appears in no served HTML
    and in none of the eagerly-loaded JS bundles — it arrives in a lazily
    loaded chunk. Grepping a saved page for the site's own captcha config
-   finds nothing. Only a real browser reveals it.
-2. **It never blocks.** A v3 widget renders no challenge frame; it scores
-   the session in the background, and Mercor served all 390 rows alongside
-   it. So it must never be paid for on a page that already has content —
-   which is what `--solve-captcha when-blocked` (the default) enforces.
+   finds nothing; only a real browser reveals it. A static marker count
+   across seven captures returns zero for every reCAPTCHA spelling.
+2. **It never blocks.** No `bframe` (challenge) iframe was rendered on any
+   route, on any run: it scores the session in the background and Mercor
+   served all 390 rows alongside it. So it must never be paid for on a page
+   that already has content — which is what `--solve-captcha when-blocked`
+   (the default) enforces.
+3. **The variant is inferred, not confirmed.** `size=invisible` with no
+   challenge frame and no `render=explicit` reads as v3, and that is what
+   this repo's detector classifies it as — but a v2-invisible that simply
+   never challenged would look identical from outside. Nothing here depends
+   on the answer, since no solve is ever attempted; it is flagged because
+   §8 says a v3 parameter sent for a v2-invisible widget buys a token the
+   site rejects, so anyone who *does* start solving here should settle the
+   variant against a real challenge first.
 
 This repo **does** implement enterprise reCAPTCHA
 (`RecaptchaV2EnterpriseTaskProxyless`), ordinary reCAPTCHA v2/v3, and

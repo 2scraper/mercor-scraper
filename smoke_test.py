@@ -683,13 +683,17 @@ def check_positive_asset_detection_is_documented_as_useless_here():
 def check_the_sites_own_captcha_is_recorded_even_though_it_never_renders():
     """§18: "no challenge rendered" is not "no captcha configured".
 
-    Mercor runs reCAPTCHA v3 Enterprise on every page. The sitekey is in NO
-    served HTML and in none of the eagerly-loaded JS chunks — it arrives in
-    a lazily-loaded bundle — so a static grep finds nothing and only a real
-    browser reveals it. That makes the usual §18 advice ("grep a good page
-    for the site's own captcha config") come up empty here, which is worth
-    a check that asserts the CURRENT behaviour so a future change is a
-    decision rather than a surprise (§10).
+    `work.mercor.com` runs invisible reCAPTCHA Enterprise on every page
+    including its 404s; `www.mercor.com` runs none at all, so `--mode
+    careers` meets no captcha whatsoever. Measured in a live browser
+    2026-09-18.
+
+    The sitekey is in NO served HTML and in none of the eagerly-loaded JS
+    chunks — it arrives in a lazily-loaded bundle — so a static grep finds
+    nothing and only a real browser reveals it. That makes the usual §18
+    advice ("grep a good page for the site's own captcha config") come up
+    empty here, which is worth a check that asserts the CURRENT behaviour so
+    a future change is a decision rather than a surprise (§10).
     """
     from product_parser import site_turnstile_sitekey
     equal("no sitekey is published in the served markup of the index",
@@ -697,8 +701,19 @@ def check_the_sites_own_captcha_is_recorded_even_though_it_never_renders():
     equal("...nor on a detail page", site_turnstile_sitekey(DETAIL_HTML), None)
     # And the documentation must say so, because the code cannot.
     solver = open(os.path.join(HERE, "captcha_solver.py"), encoding="utf-8").read()
-    check("captcha_solver records that a v3 Enterprise widget IS configured",
-          "v3 Enterprise" in solver or "reCAPTCHA v3 Enterprise" in solver)
+    check("captcha_solver records that an Enterprise widget IS configured",
+          "reCAPTCHA Enterprise" in solver)
+    # The HOST SPLIT is the part most likely to be lost in an edit, and
+    # getting it wrong sends a reader looking for a captcha on a route that
+    # has none. Measured in a live browser: zero captcha requests on
+    # www.mercor.com and on /careers.
+    check("...and that the corporate host runs none",
+          "CORPORATE host runs none" in solver or "www.mercor.com         NOTHING" in solver,
+          "the marketplace/corporate captcha split is not recorded")
+    check("...and that the variant is inferred rather than confirmed",
+          "inferred rather than confirmed" in solver,
+          "an unchallenging v2-invisible is indistinguishable from v3 from "
+          "outside, and §8 says the wrong parameters buy a rejected token")
     check("...and that it is invisible to a capture",
           "lazily-loaded bundle" in solver or "lazily loaded bundle" in solver)
     # A sitekey inside an extension's script tag is the Scraping Browser's
