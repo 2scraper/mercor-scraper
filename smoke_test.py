@@ -1400,6 +1400,70 @@ def check_a_copied_env_example_reads_as_UNSET():
         os.environ.update(before)
 
 
+def check_ci_greps_for_a_sentinel_this_suite_can_actually_emit():
+    """The `engine-smoke` job must be ABLE to fail.
+
+    That job exists for one reason (CLAUDE.md §10): "skipped, engine absent"
+    reads identically to a real import error, so CI installs each engine and
+    fails if THAT engine's group still reports a skip. It works by grepping
+    the suite's own output for a sentinel.
+
+    The inherited version grepped for `"<engine>_scraper could not be
+    imported"` — a string no suite in this family emits. Checked 2026-09-18,
+    seven sibling repos carry the same dead grep, so in none of them could
+    the job ever have failed. It passed for the wrong reason, which is
+    §22's "a check that swallows the loudest failure it could report".
+
+    This check is the guard against that coming back: whatever sentinel the
+    workflow looks for, this suite has to be capable of printing it. It
+    verifies the sentinel against `skip()`'s real output format rather than
+    against a copy of the string, so changing either one without the other
+    fails here.
+    """
+    workflow = os.path.join(HERE, ".github", "workflows", "tests.yml")
+    if not os.path.isdir(os.path.join(HERE, ".github")):
+        # §22: trigger on the WHOLE .github directory being absent — which
+        # is the Docker image, where it is deliberately not COPYed — and
+        # never on a file inside it going missing, because a check that
+        # quietly starts passing once its input disappears is the failure
+        # mode this whole function is about.
+        skip("ci-sentinel", "no .github/ in this tree (the Docker image)")
+        return
+    check("tests.yml exists", os.path.exists(workflow))
+    if not os.path.exists(workflow):
+        return
+    text = open(workflow, encoding="utf-8").read()
+
+    # What `skip()` actually prints, derived rather than quoted.
+    import io as _io, contextlib as _contextlib
+    buf = _io.StringIO()
+    before = len(SKIPS)
+    with _contextlib.redirect_stdout(buf):
+        skip("playwright_scraper", "engine library absent (probe)")
+    del SKIPS[before:]          # leave the run's real skip list untouched
+    printed = buf.getvalue()
+    check("skip() prints a line naming the engine", "playwright_scraper" in printed,
+          repr(printed))
+
+    # The sentinel the workflow greps for, with the matrix placeholder
+    # resolved the way Actions would resolve it.
+    greps = re.findall(r'grep -q(?:E)? "([^"]*matrix\.engine[^"]*)"', text)
+    check("the engine-smoke step greps for something", bool(greps),
+          "no grep against ${{ matrix.engine }} found in tests.yml")
+    for pattern in greps:
+        resolved = pattern.replace("${{ matrix.engine }}", "playwright")
+        check("the CI sentinel %r is a string this suite can emit" % resolved,
+              resolved in printed,
+              "the workflow greps for %r but skip() prints %r — the job "
+              "cannot fail" % (resolved, printed.strip()))
+
+    # And the other half: the step must confirm the suite RAN, or a crash on
+    # line one sails past a grep for an absent string.
+    check("the engine-smoke step also asserts the suite ran to completion",
+          "checks passed" in text,
+          "nothing in tests.yml checks for the suite's summary line")
+
+
 def check_credential_scan_is_one_implementation_invoked_from_both():
     """§17: two sources of truth, one dead and one holed.
 
