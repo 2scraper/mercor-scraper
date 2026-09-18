@@ -746,7 +746,7 @@ def handle_captcha_if_present(page, args) -> bool:
     against each other rather than short-circuited, because they can disagree
     about the variant and the parameters for one are rejected for the other.
 
-    WHAT THIS SITE ACTUALLY PUTS IN FRONT OF A RUN, measured 2026-09-17,
+    WHAT THIS SITE ACTUALLY PUTS IN FRONT OF A RUN, measured 2026-09-18,
     because CLAUDE.md §19 is explicit that a sentence about what a solver
     can do is the most expensive thing this family can get wrong:
 
@@ -949,12 +949,21 @@ def _solve_budget(args, spent: int):
     and once after, for the state that says the page really is gated — and
     only the SECOND call was counted.
 
-    Measured 2026-09-17 on a run from a datacenter address, which meets a
-    real Cloudflare challenge on every fetch: ONE page bought THREE Turnstile
+    INHERITED EVIDENCE, from a SIBLING repo and not from Mercor — labelled
+    because §13 says a number you inherited is not a number you measured,
+    and this one cannot be reproduced here: Mercor has never rendered a
+    challenge to this scraper, so no page of this site has ever bought a
+    solve at all.
+
+    On that sibling, from a datacenter address that meets a real Cloudflare
+    challenge on every fetch (2026-09-17): ONE page bought THREE Turnstile
     solves — two from the uncounted call across two block attempts, one from
     the counted one — and every token was refused. The cap read as enforced
     and was not (CLAUDE.md §17: a policy constant nothing reads is the same
     defect as dead code).
+
+    The fix is carried here anyway. A budget that is never exercised is
+    still the difference between a bill and no bill on the day it is.
 
     Both call sites now go through here.
     """

@@ -22,24 +22,26 @@ Four buckets, each keyed on sku:
   removed        — sku present in --old, absent from --new: the listing was
                    filled or withdrawn, or simply fell outside the pages this
                    run fetched
-  changed        — sku present in both, with a different title, salary or
-                   equity range, job type, remote configuration, location, or
-                   company size. See TRACKED_FIELDS.
-  source_changed — sku present in both, but one row came from a LANDING run
-                   (`apollo`) and the other from a JOB page (`jsonld`), and
-                   they differ on a column only one of the two fills.
+  changed        — sku present in both, with a different title, rate range,
+                   pay period, commitment, work arrangement, location, or
+                   slot count. See TRACKED_FIELDS.
+  source_changed — sku present in both, but one row came from the INDEX
+                   (`explore`) and the other from a DETAIL page (`detail`),
+                   and they differ on a column only one of the two fills.
                    Reported separately because this says something about our
-                   own two snapshots rather than about the job — and
+                   own two snapshots rather than about the listing — and
                    --fail-on-change deliberately ignores it.
 
 TWO THINGS TO KNOW BEFORE READING A DIFF OF THIS SITE
 -----------------------------------------------------
-**`removed` does not mean filled.** A landing listing paginates over
-COMPANIES, twenty per page, and /role/r/software-engineer reported 47 pages
-of them — so a two-page run holds a slice, and a job can leave the file
-because the slice moved rather than because anything happened to the job.
-Two runs are only comparable as a census when both fetched the same URL to
-the same depth.
+**`removed` does not mean filled.** `/explore` is not the whole site: it
+held 390 of the 462 listings the sitemap and the index enumerate between
+them on 2026-09-18, and the 72 it omits are live jobs. So a listing can
+leave a `--mode listings` file because it left the INDEX, not because
+anything happened to the job — and a `--mode job` run bounded by `--pages`
+holds a slice of the enumeration for the same reason. Two runs are only
+comparable as a census when both covered the same ground; `--mode job
+--pages 462` is what "the same ground" means here.
 
 Mercor publishes no catalogue total on any route, so there is no site-stated
 figure to drift — what a run records instead is its own coverage
@@ -75,32 +77,70 @@ from typing import Dict, List, Optional, Tuple
 
 from output_writer import UNIQUE_BY_SKU_MODES
 
-# What is worth watching on a job board, and nothing else.
+# What is worth watching on a Mercor listing, and nothing else.
 #
-# A price monitor's fields are absent because a job has no price — porting
-# them would be dead code that looks load-bearing (CLAUDE.md §4). What
-# changes on a job listing is its PAY, its TERMS and the COMPANY behind it,
-# and those are what anyone diffs a job board for.
+# EVERY NAME HERE MUST EXIST ON THE ROW CLASS, and that is not a style rule.
+# This tuple arrived from the repo this one was ported from and named 25
+# fields, 21 of which `JobPosting` does not have — so the diff compared
+# nothing, and a listing whose rate went from 100 to 999 with its status
+# changed to `closed` reported "0 changed" and exit 0. A price monitor that
+# cannot see a price change is worse than no price monitor, because it
+# reports success. `smoke_test.py` now pins every name against the dataclass.
 #
-# `locations`, `remote_locations` and `company_badges` are lists and compare
-# element-wise, which is what you want: a company losing its "Actively
-# Hiring" badge is a real change.
+# A shop's fields are absent because a job has no price, stock or discount —
+# porting them would be dead code that looks load-bearing (CLAUDE.md §4).
+# What changes on a Mercor listing is its PAY, its TERMS, its ELIGIBILITY
+# and the client behind it.
 #
-# Deliberately NOT tracked: `position` and `page`, and `scraped_at`. See the
-# module docstring for the measurement.
+# `eligible_locations` and `eligible_residence_locations` are lists and
+# compare element-wise, which is what you want: a role opening up to a new
+# country is a real change.
+#
+# DELIBERATELY NOT TRACKED, and this one is a measurement rather than an
+# oversight — the live supply counters:
+#
+#     remaining_slots  supplied_slots  available_spots
+#     active_contractors_count  recent_candidates_count
+#
+# They move on their own. Two `--mode listings` runs a few minutes apart on
+# 2026-09-18 already differed on one: `remaining_slots` 30 -> 29 and
+# `supplied_slots` 0 -> 1, because a contractor was supplied in between.
+# Tracking them would make every nightly diff report hundreds of "changes"
+# that are the marketplace working normally, and a diff that is always noisy
+# is one nobody reads. They are still COLUMNS — a consumer who wants supply
+# telemetry has it — they are simply not what `changed` is for.
+#
+# Also not tracked: `position`, `page`, `scraped_at`, and `data_source`
+# (which drives `source_changed` instead). See the module docstring.
 TRACKED_FIELDS = (
-    # the job
-    "title", "job_type", "primary_role", "years_experience_min",
-    "years_experience_max", "posted_at",
-    # the pay
-    "compensation", "salary_min", "salary_max", "salary_currency",
-    "salary_period", "equity_min", "equity_max", "has_equity",
+    # what the job is
+    "title",
+    "status",
+    "listing_type",
+    "domain",
+    "department",
+    "team",
+    # what it pays
+    "rate_min",
+    "rate_max",
+    "rate_currency",
+    "rate_period",
+    "compensation",
+    "offers_equity",
+    "referral_amount",
+    # on what terms
+    "commitment",
+    "employment_type",
+    "hours_per_week",
     # where
-    "locations", "remote", "remote_kind", "wfh_flexible", "remote_locations",
-    # the company
-    "company_name", "company_size", "company_tagline", "company_badges",
-    # only a job-page run fills these; see DETAIL_ONLY_FIELDS
-    "benefits", "industry",
+    "location",
+    "work_arrangement",
+    "eligible_locations",
+    "eligible_residence_locations",
+    # who for
+    "company_name",
+    "company_brand_visible",
+    "company_website",
 )
 
 # The subset that only ONE of the two sources populates.

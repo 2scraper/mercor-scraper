@@ -104,6 +104,16 @@ Four traps cost real time here and are pinned by tests so they stay fixed:
   same Next.js app and references `/_next/static` *more* than a real page
   does. `detect_page_state` leads with the presence of `__NEXT_DATA__`
   instead, which the 404 carries none of.
+- **`diff_runs.TRACKED_FIELDS` must name columns that exist.** Ported
+  verbatim it named 25 fields of which this row class has four, so the diff
+  compared nothing: a listing whose rate went 100 → 999 with its status
+  changed to `closed` reported *0 changed* and exit 0. A price monitor that
+  cannot see a price change is worse than none, because it reports success.
+  No fixture and no live run would have shown it — two runs of identical
+  data report "0 changed" whether the comparison works or not — so it is
+  pinned against the dataclass instead. The family has now paid for this
+  twice; the first was a supermarket scraper whose price diff tracked a
+  blogging platform's "claps".
 
 [Unreleased]: https://github.com/2scraper/mercor-scraper/compare/v0.1.0...HEAD
 [0.1.0]: https://github.com/2scraper/mercor-scraper/releases/tag/v0.1.0

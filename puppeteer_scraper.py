@@ -754,10 +754,19 @@ def _solve_budget(args, spent: int):
     `handle_captcha_if_present` is called twice per attempt — once before the
     page is classified and once after — and only the SECOND call was counted.
 
-    Measured 2026-09-17 from a datacenter address, which meets a real
-    Cloudflare challenge on every fetch: ONE page bought THREE Turnstile
-    solves, and every token was refused. The cap read as enforced and was not
-    (CLAUDE.md §17). Both call sites now go through here.
+    INHERITED EVIDENCE, from a SIBLING repo and not from Mercor — labelled
+    because §13 says a number you inherited is not a number you measured,
+    and this one cannot be reproduced here: Mercor has never rendered a
+    challenge to this scraper, so no page of this site has ever bought a
+    solve at all.
+
+    On that sibling, from a datacenter address that meets a real Cloudflare
+    challenge on every fetch (2026-09-17): ONE page bought THREE Turnstile
+    solves, and every token was refused. The cap read as enforced and was
+    not (CLAUDE.md §17). Both call sites now go through here.
+
+    The fix is carried here anyway. A budget that is never exercised is
+    still the difference between a bill and no bill on the day it is.
     """
     return spent < page_flow.SOLVES_PER_PAGE
 

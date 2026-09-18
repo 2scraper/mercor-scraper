@@ -710,6 +710,61 @@ def check_the_sites_own_captcha_is_recorded_even_though_it_never_renders():
           site_turnstile_sitekey(injected), None)
 
 
+def check_every_tracked_field_exists_on_the_row_class():
+    """The check that catches a whole bug class, and it caught one here.
+
+    `diff_runs.TRACKED_FIELDS` decides what `changed` means. It arrived from
+    the repo this one was ported from naming 25 fields, of which `JobPosting`
+    has FOUR — so the diff compared almost nothing. Verified before the fix
+    by feeding it two runs that differed in rate (100 -> 999), status
+    (`active` -> `closed`), work arrangement and eligibility: it reported
+    **0 changed** and exit 0.
+
+    That is the worst shape a bug can take in this family, because it
+    reports success. A sibling repo shipped exactly it — a supermarket
+    scraper whose price diff tracked a blogging platform's "claps" and could
+    not see a price change — so this is the second time the family has paid
+    for it, and the first time it has been pinned.
+
+    One line, and it is the reason to write checks against the DATA
+    STRUCTURE rather than against behaviour alone: no fixture and no live
+    run would have shown this, because two runs of identical data report
+    "0 changed" whether the comparison works or not.
+    """
+    from dataclasses import fields as _fields
+    from output_writer import JobPosting
+    import diff_runs
+
+    names = {f.name for f in _fields(JobPosting)}
+    tracked = tuple(diff_runs.TRACKED_FIELDS)
+    check("TRACKED_FIELDS is not empty", bool(tracked))
+    unknown = [f for f in tracked if f not in names]
+    check("every tracked field exists on the row class", not unknown,
+          "these are compared and can never differ: %s" % unknown)
+
+    # And the other direction, loosely: the columns a consumer most likely
+    # diffs this site FOR must actually be watched. Named explicitly rather
+    # than "most of them", so dropping one is a decision.
+    for essential in ("title", "rate_min", "rate_max", "rate_period", "status",
+                      "work_arrangement", "company_name"):
+        check("`%s` is watched for changes" % essential, essential in tracked,
+              "a listing could change it and the diff would stay silent")
+
+    # The live supply counters must NOT be tracked: they move on their own
+    # (measured, two runs minutes apart already differed on one), and a diff
+    # that is always noisy is one nobody reads.
+    for telemetry in ("remaining_slots", "supplied_slots", "available_spots",
+                      "active_contractors_count", "recent_candidates_count"):
+        check("`%s` is NOT tracked — it is live telemetry" % telemetry,
+              telemetry not in tracked,
+              "tracking it makes every nightly diff report the marketplace "
+              "working normally")
+
+    # Bookkeeping columns would report a change on every single run.
+    for never in ("scraped_at", "page", "position", "data_source"):
+        check("`%s` is not tracked" % never, never not in tracked)
+
+
 def check_row_schema():
     """The family prefix is byte-identical and in order (§9), and the
     columns this site cannot fill are ABSENT rather than null."""
@@ -1851,7 +1906,9 @@ def check_every_solve_is_counted_against_the_budget():
     really is gated. Only the second was counted, and the first therefore
     bought a solve on every block attempt, for free, silently.
 
-    Measured live 2026-09-17 from a datacenter address, which meets a real
+    INHERITED from a sibling repo, not measured here — Mercor refuses
+    nothing, so this repo has no such run. Measured there 2026-09-17 from a
+    datacenter address, which meets a real
     Cloudflare challenge on every fetch: one page bought THREE Turnstile
     solves before the fix and ONE after, with the cap set to 1 both times.
     Every token was refused either way, so the three purchases bought
@@ -1921,7 +1978,8 @@ def check_a_dead_proxy_is_reported_as_a_proxy_failure():
               "after %d attempt(s)" in branch,
               "the non-proxy branch was lost")
     # ...and the detector the branch depends on must actually match the
-    # string Chromium produces. Measured live 2026-09-17 against a dead
+    # string Chromium produces. Measured on a SIBLING repo 2026-09-17
+    # against a dead
     # local port: `net::ERR_PROXY_CONNECTION_FAILED`.
     engine = _import_engine("playwright_scraper")
     if engine is None:
