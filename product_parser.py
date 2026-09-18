@@ -765,9 +765,9 @@ _ASHBY_INTERVAL_TO_PERIOD = {
 }
 
 
-def careers_salary(compensation: Any) -> Tuple[Optional[float], Optional[float],
-                                               Optional[str], Optional[str],
-                                               Optional[bool]]:
+def careers_salary(compensation: Any, *, may_display: Any = None
+                   ) -> Tuple[Optional[float], Optional[float],
+                              Optional[str], Optional[str], Optional[bool]]:
     """(min, max, currency, period, offers_equity) from an Ashby compensation.
 
     A role may publish SEVERAL tiers, which are seniority bands rather than
@@ -782,8 +782,31 @@ def careers_salary(compensation: Any) -> Tuple[Optional[float], Optional[float],
     USD components against 4 GBP on 2026-09-18. Where tiers disagree on
     currency the row's currency is None and the mismatch is warned, because
     a range spanning two currencies is not a range.
+
+    `may_display` is Ashby's `shouldDisplayCompensationOnJobPostings`, and
+    it is the AUTHORITY rather than a hint — CLAUDE.md §21: where a site
+    publishes a should-I-show-this flag, use it rather than inferring from
+    the value. False means the site is withholding the figure, so the pay
+    columns are null whatever the tiers happen to contain.
+
+    Today the flag and the tiers agree on all 108 roles: the three with
+    `False` carry no tiers at all. Consulting the flag anyway is the safe
+    direction — a role that ever carries both would otherwise have its
+    withheld salary republished by this scraper.
+
+    A ZERO is not the same as a missing value here, and the two are told
+    apart by exactly this flag. "Mercor AI Safety Fund Grants" publishes
+    `shouldDisplayCompensationOnJobPostings: True`, a
+    `compensationTierSummary` of `"$0"` and a real `(0, 0, USD)` salary
+    component: that is a grant programme and the zero is deliberate, so it
+    is written through as `0.0`. The withheld roles get `None`. A consumer
+    tells them apart without any extra column, because `compensation` keeps
+    the site's own string — `"$0"` against `null`.
     """
     if not isinstance(compensation, dict):
+        return None, None, None, None, None
+    if may_display is False:
+        # The site said not to show it. Nothing below may override that.
         return None, None, None, None, None
     mins: List[float] = []
     maxes: List[float] = []
@@ -1004,7 +1027,8 @@ def _row_from_career(record: Dict[str, Any], *, position: Optional[int] = None,
                     _str_or_none(record.get("title")))
         return None
     low, high, currency, period, equity = careers_salary(
-        record.get("compensation"))
+        record.get("compensation"),
+        may_display=record.get("shouldDisplayCompensationOnJobPostings"))
     address = ((record.get("address") or {}).get("postalAddress")
                if isinstance(record.get("address"), dict) else {}) or {}
     locations = [_str_or_none(record.get("location"))]

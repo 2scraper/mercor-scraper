@@ -385,11 +385,54 @@ def check_careers_pay_spans_tiers_and_reads_its_own_currency():
           fellow.compensation)
 
     nopay = rows["Strategic Project Associate"]
-    equal("a role with no compensation block gets null, not zero",
+    equal("a WITHHELD salary gets null, not zero",
           (nopay.rate_min, nopay.rate_max, nopay.rate_currency),
           (None, None, None))
     check("...and its title and id still parse",
           bool(nopay.title and nopay.sku))
+    equal("...and it keeps no compensation string either",
+          nopay.compensation, None)
+
+
+def check_a_stated_zero_survives_but_a_withheld_one_does_not():
+    """§21, both directions — and the canary caught the second one live.
+
+    A zero and a missing value are different facts, and Ashby distinguishes
+    them with `shouldDisplayCompensationOnJobPostings`:
+
+      * "Mercor AI Safety Fund Grants" sets it TRUE, prints `"$0"` and
+        carries a real `(0, 0, USD)` salary component. That is a grant
+        programme; the zero is deliberate and must survive.
+      * two "Strategic Project" roles set it FALSE and carry no tiers. That
+        is the site withholding, and it must be null — a zero written
+        through drags every average a consumer computes.
+
+    The first version of the canary's guard banned zero outright and failed
+    on the grant row: a correct parse reported as a defect. The flag is the
+    authority, not the value.
+    """
+    from product_parser import careers_salary
+
+    grant = {"compensationTierSummary": "$0", "compensationTiers": [
+        {"components": [{"compensationType": "Salary", "interval": "1 YEAR",
+                         "currencyCode": "USD", "minValue": 0, "maxValue": 0}]}]}
+    low, high, cur, _, _ = careers_salary(grant, may_display=True)
+    equal("a zero the site STATED survives", (low, high, cur), (0.0, 0.0, "USD"))
+
+    # The flag wins over the tiers, which is the safe direction: a role that
+    # ever carried both would otherwise have its withheld salary republished.
+    real = {"compensationTierSummary": "$100K", "compensationTiers": [
+        {"components": [{"compensationType": "Salary", "interval": "1 YEAR",
+                         "currencyCode": "USD", "minValue": 100000,
+                         "maxValue": 100000}]}]}
+    equal("a salary the site WITHHOLDS is null even when tiers carry one",
+          careers_salary(real, may_display=False)[:3], (None, None, None))
+    equal("...and is read normally when the site permits it",
+          careers_salary(real, may_display=True)[:3], (100000.0, 100000.0, "USD"))
+    equal("...and when the site states no preference",
+          careers_salary(real, may_display=None)[:3], (100000.0, 100000.0, "USD"))
+    equal("no compensation block at all is null, not zero",
+          careers_salary({}, may_display=True)[:3], (None, None, None))
 
 
 def check_careers_rows_are_a_different_population():

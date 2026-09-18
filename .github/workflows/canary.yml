@@ -207,11 +207,36 @@ jobs:
           want("...and every one that does names a currency",
                all(r.get("rate_currency") for r in paid),
                "a salary came through with no currency")
-          # A role with no compensation block must be null, never zero — a
-          # zero written through drags every average a consumer computes.
-          want("no zero-salary sentinel",
-               not any(r.get("rate_min") == 0 for r in crows),
-               "a missing salary was written as 0")
+          # A WITHHELD salary must be null, never zero — a zero written
+          # through drags every average a consumer computes (CLAUDE.md §21).
+          #
+          # But a STATED zero is real and must survive. Mercor publishes
+          # "Mercor AI Safety Fund Grants" with a compensationTierSummary of
+          # "$0" and a genuine (0, 0, USD) component: a grant programme, not
+          # a missing figure. The first version of this check banned zero
+          # outright and failed on exactly that row — a correct parse
+          # reported as a defect.
+          #
+          # The two are told apart by the site's own string, which is what
+          # `compensation` keeps verbatim: a zero is legitimate only if the
+          # site printed one.
+          bad_zero = [r for r in crows
+                      if r.get("rate_min") == 0 and not (r.get("compensation") or "")]
+          want("no zero-salary sentinel without the site stating it",
+               not bad_zero,
+               "a withheld salary was written as 0: %s"
+               % [r.get("sku") for r in bad_zero])
+          stated_zero = [r for r in crows if r.get("rate_min") == 0]
+          if stated_zero:
+              print(f"{len(stated_zero)} role(s) state a zero the site printed: "
+                    + ", ".join(f'{r["title"]!r}={r["compensation"]!r}'
+                                for r in stated_zero))
+          # And the other half: a role the site refuses to show pay for must
+          # come back null on every pay column, not partially filled.
+          half = [r for r in crows
+                  if (r.get("rate_min") is None) != (r.get("rate_currency") is None)]
+          want("a withheld salary is null on every pay column", not half,
+               str([r.get("sku") for r in half]))
 
           if failures:
               for line in failures:
