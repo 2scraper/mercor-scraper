@@ -48,6 +48,9 @@ describing those sites as if they were this one.
   `captcha_solver.py` (a pointer to a section that does not exist) and
   `smoke_test.py` (now names the sibling it happened in).
 
+- `SECURITY.md` said this project has no releases or version tags; it has
+  both. "Supported versions" now names the latest release and `main`.
+
 ## [0.1.0] — 2026-09-18
 
 First release. Scrapes [mercor.com](https://mercor.com) with Playwright,
