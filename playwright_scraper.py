@@ -204,19 +204,6 @@ def _core_fields(mode: str):
         return CORE_FIELDS_CAREERS
     return CORE_FIELDS
 
-# A landing page holding less than this share of the rows a full page
-# carries is reported as thin.
-#
-# Set LOW on purpose, and the reason is the site's own arithmetic: a landing
-# page paginates over COMPANIES — twenty per page — while the rows are JOBS,
-# and how many jobs twenty companies have is not fixed. Measured across the
-# captures: 32, 37, 43, 45 and 5 rows per page, the 5 being the last page of
-# a 47-page listing. A share computed against `page_size` would call a
-# perfectly normal page thin, so this is compared against the ROW count of
-# page 1 rather than against the site's page size.
-THIN_PAGE_SHARE = 0.35
-
-
 # ---------------------------------------------------------------------------
 # page_flow, bound to Playwright
 # ---------------------------------------------------------------------------
@@ -257,11 +244,11 @@ def _min_matches(args) -> int:
     return page_flow.min_matches(args.mode)
 
 
-def _classify(page, html: str, status=None, mode: str = "role") -> str:
-    """`mode` is threaded through because the two page kinds are read by
-    different mechanisms: a job page has no `__NEXT_DATA__` at all, so
-    classifying one as a listing would call a perfectly good page a
-    parse_error."""
+def _classify(page, html: str, status=None, mode: str = "listings") -> str:
+    """`mode` is threaded through because each mode reads a different part
+    of `__NEXT_DATA__` (the index's listings, a detail page's `role`, the
+    careers route's jobs), so classifying a job page as a listing would
+    call a perfectly good page empty."""
     return page_flow.classify(html, status, page.url, mode)
 
 # Every readiness constant and every state policy lives in page_flow.py, with
@@ -299,7 +286,7 @@ def _target_url(args) -> str:
 
     Every mode has a correct default, so a bare `python3
     playwright_scraper.py` is a working command rather than a usage error.
-    There is nothing to build from flags the way a sibling repo builds a
+    There is nothing to build from flags the way wellfound-scraper builds a
     landing URL from `--role`: Mercor's index takes no parameters at all
     (every one tried was ignored — see `page_url`), so the only choice a
     user has is which of three routes to read, and `--mode` is that choice.
@@ -1490,8 +1477,8 @@ def scrape(args) -> int:
     outcomes: List[PageOutcome] = []
     seen_keys = set()
     blocked = False
-    # All three modes are one row per business-at-a-location, so `sku` is the
-    # key for all of them.
+    # All three modes are one row per listing (or careers opening), so `sku`
+    # is the key for all of them.
     dedupe_key = "sku"
     # Why the loop ended. "completed" means every requested page was
     # fetched; "no_new_products" means the enumeration itself ran out (also
@@ -1612,7 +1599,7 @@ def scrape(args) -> int:
                                           first.pages_available,
                                           job_urls=job_urls)
                 if len(planned) + 1 < args.pages:
-                    # Capped by the site's own `pageCount`, a complete
+                    # Capped by the length of the job enumeration, a complete
                     # answer rather than an early stop — see COMPLETE_STOP_REASONS.
                     stop_reason = "page_cap_reached"
 
@@ -1873,14 +1860,11 @@ def parse_args():
                         "the `domain` column, which is where a filterable "
                         "field belongs.")
     p.add_argument("--pages", type=int, default=1,
-                   help="Number of listing pages to fetch. Applies to --mode "
-                        "role only. A run PLANS against the `pageCount` the "
-                        "site states on page 1 and never asks past it — "
-                        "asking for page 48 of a 47-page listing does not "
-                        "error, it answers HTTP 200 with page 1 AGAIN, which "
-                        "a run that trusted the request would collect twice. "
-                        "A request for more is honoured up to that cap and "
-                        "the sidecar records both numbers.")
+                   help="Pages to fetch. Only --mode job paginates, and "
+                        "there a page is one job, planned from the sitemap "
+                        "and index enumeration and capped by its length. "
+                        "--mode listings and --mode careers have one page "
+                        "each and ignore a larger value with a log line.")
     p.add_argument("--delay", type=float, default=2.0, help="Delay between pages, seconds")
     p.add_argument("--concurrency", type=int, default=1, metavar="N",
                    help="Fetch pages through N parallel workers (default 1 — "
@@ -1982,7 +1966,8 @@ def parse_args():
     p.add_argument("--dump-html", default=None, metavar="PATH",
                    help="Save the exact HTML the parser is given, on success as "
                         "well as failure. Useful when the row count is right but "
-                        "a column comes back empty — see TROUBLESHOOTING.md.")
+                        "a column comes back empty — see 'Traps that look like "
+                        "bugs' in the README.")
     p.add_argument("--headless", action="store_true", default=True)
     p.add_argument("--headful", dest="headless", action="store_false")
     args = p.parse_args()
