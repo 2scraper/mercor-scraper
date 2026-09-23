@@ -11,6 +11,43 @@ it from a bill or from a diff.
 
 ## [Unreleased]
 
+Text and data copied from sibling repos when this one was bootstrapped,
+describing those sites as if they were this one.
+
+### Fixed
+
+- **`diff_runs.py` never reported `source_changed`.** Its one-source column
+  list named another site's fields (`equity_min`, `company_badges`, ...),
+  none of which `JobPosting` has, so the same listing read from the index
+  and from its detail page came out as a `changed` row. It now lists this
+  site's one-source columns (`domain`, `employment_type`, `rate_currency`,
+  `company_website`), and a new check replays the pair in
+  `sample_output.json`. Its usage example and its output line also
+  described another site's flags and "profile" rows.
+- `selenium_scraper.py` and `puppeteer_scraper.py`: a post-run block keyed
+  on `--mode role`, which this repo does not have, so the `/explore`
+  coverage note never printed. It now runs on `--mode listings`, as it does
+  in `playwright_scraper.py`. The dead thin-page constant went with it.
+- `--pages` help in all three engines described another site's
+  pagination (`--mode role`, "page 48 of a 47-page listing"). It now says
+  what this site does: only `--mode job` paginates, one job per page.
+- `scraper_api_client.py --help`: the description said `--cdp-url` was
+  required because Mercor refuses datacentre exits (false: every route was
+  served to one), `--mode` claimed a default of "profile", `--url` named
+  another site's routes, and `--category` claimed to tag rows.
+- Issue templates: the bug report and site-change templates were written
+  for another site (its bot vendor, URLs and columns). Rewritten from this
+  README. Three links to a `TROUBLESHOOTING.md` that does not exist, one of
+  them in `--dump-html` help, now point at the README's "Traps that look
+  like bugs".
+- `CONTRIBUTING.md`: removed four bullets describing another site's routes,
+  pagination and pay strings.
+- `.gitignore` / `.dockerignore`: another site's output prefix replaced with
+  this repo's default, `mercor_jobs` (and `mercor_jobs_scraperapi`).
+- Stale comments naming donor behaviour as this repo's, in the engines,
+  `captcha_solver.py` (a pointer to a section that does not exist) and
+  `smoke_test.py` (now names the sibling it happened in).
+
 ## [0.1.0] — 2026-09-18
 
 First release. Scrapes [mercor.com](https://mercor.com) with Playwright,

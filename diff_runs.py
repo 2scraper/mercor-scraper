@@ -5,16 +5,15 @@ diff_runs.py
 Compares two output files from this project (JSON, as written by
 output_writer.save) and reports what changed between them, keyed on `sku`.
 
-    python3 diff_runs.py --old restaurants.2026-09-01.json \\
-                          --new restaurants.2026-09-07.json
+    python3 diff_runs.py --old mercor.2026-09-01.json \\
+                          --new mercor.2026-09-07.json
 
 Typical use is a scheduled re-run kept under a dated filename, diffed against
 the previous one:
 
-    python3 playwright_scraper.py --text restaurants --location "New York, NY" \\
-        --out "restaurants_$(date +%F)"
-    python3 diff_runs.py --old "restaurants_$(ls -t restaurants_*.json | sed -n 2p)" \\
-                          --new "restaurants_$(date +%F).json" --out diff.json
+    python3 playwright_scraper.py --mode listings --out "mercor_$(date +%F)"
+    python3 diff_runs.py --old "$(ls -t mercor_????-??-??.json | sed -n 2p)" \\
+                          --new "mercor_$(date +%F).json" --out diff.json
 
 Four buckets, each keyed on sku:
 
@@ -146,19 +145,17 @@ TRACKED_FIELDS = (
 # The subset that only ONE of the two sources populates.
 #
 # The split runs both ways on this site, which is why it is worth stating.
-# A landing row (`apollo`) has the equity range, the company's badges, size
-# and tagline, and no salary period. A job-page row (`jsonld`) has the
-# period, the benefits and the industry, and no equity at all — schema.org
-# has no expression for it. So diffing a landing run against a job run would
-# report each of these as a change on every row, and none of it would be
-# about the job. When the two rows disagree on `data_source`, they are
+# An index row (`explore`) has the site's `domain` category and no currency;
+# a detail-page row (`detail`) has the currency, the schema.org employment
+# type and the company website, and no `domain`. Read off the same listing
+# both ways in sample_output.json. So diffing a listings run against a job
+# run would report each of these as a change on every row, and none of it
+# would be about the job. When the two rows disagree on `data_source`, they are
 # reported as `source_changed` rather than as changes (§8: a difference that
 # comes with a provenance difference says something about our own two
 # snapshots, not about the site).
 DETAIL_ONLY_FIELDS = (
-    "benefits", "industry", "salary_period",
-    "equity_min", "equity_max", "has_equity",
-    "company_size", "company_tagline", "company_badges",
+    "domain", "employment_type", "rate_currency", "company_website",
 )
 # Kept as an alias so a caller written against the family's older name still
 # works; the two are the same tuple.
@@ -208,9 +205,9 @@ def diff_products(old: List[dict], new: List[dict]) -> dict:
             continue
 
         # A row whose `data_source` differs between runs is not comparable on
-        # the profile-only columns: a listing row leaves them null and a
-        # profile row fills them, so every one of them would read as a change
-        # and none of it would be about the business. Reporting it as a
+        # the one-source columns: an index row leaves some of them null and a
+        # detail row fills them (and the other way round), so every one of
+        # them would read as a change and none of it would be about the job. Reporting it as a
         # change would be a false alarm about the site; the other columns
         # still compare fine.
         sources = (before.get("data_source"), after.get("data_source"))
@@ -263,9 +260,9 @@ def _print_summary(result: dict) -> None:
         deltas = ", ".join(f"{f}: {v['old']!r} -> {v['new']!r}"
                            for f, v in c["changes"].items())
         print(f"  ? {c['sku']}  {c['title']}  {deltas}  "
-              f"[data_source {src['old']!r} -> {src['new']!r}: a listing row "
-              f"leaves these columns null and a profile row fills them, so "
-              f"this is not a change in the business]")
+              f"[data_source {src['old']!r} -> {src['new']!r}: the index and "
+              f"a detail page each fill columns the other leaves null, so "
+              f"this is not a change in the job]")
     unmatchable = result["unmatchable_old"] + result["unmatchable_new"]
     if unmatchable:
         print(f"[!] {unmatchable} row(s) across both files had no sku or a "
@@ -437,9 +434,9 @@ def main() -> int:
         print(f"[+] Full diff written to {args.out}")
 
     # `source_changed` is not a reason to fail: it means one row came from a
-    # listing run and the other from a profile run, so the columns only a
-    # profile fills differ. That says something about our own two snapshots
-    # rather than about the business, and alerting on it would train whoever
+    # listings run and the other from a job run, so the columns only one of
+    # them fills differ. That says something about our own two snapshots
+    # rather than about the job, and alerting on it would train whoever
     # reads the alert to ignore it.
     if args.fail_on_change and (result["added"] or result["removed"] or result["changed"]):
         return 1

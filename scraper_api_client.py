@@ -295,13 +295,12 @@ def _run_once(args, attempt: int = 1, attempts: int = 1) -> int:
 def parse_args():
     p = argparse.ArgumentParser(
         description="Mercor scraper — 2captcha Scraper API edition (no local "
-                    "browser). Built for --mode profile, which is one "
-                    "server-rendered page and a good fit. NOT the way to "
-                    "browser needed). What decides success is the EXIT: "
-                    "ordinary HTTPS request with no key and no proxy, so "
-                    "paying for a rendered page there buys nothing. "
-                    "--cdp-url is REQUIRED — the Scraper API's own exits are "
-                    "datacenter addresses and Mercor refuses them.")
+                    "browser). Fetches one page and parses it with the same "
+                    "reader the browser engines use. Mercor served every "
+                    "route to a bare datacentre address when measured, so "
+                    "this path is for when you want someone else's "
+                    "infrastructure to run the browser, not because the "
+                    "site demands it. --cdp-url is optional.")
     # NOT required: prefer the TWOCAPTCHA_KEY env var. A key passed on the
     # command line is visible to anyone who can run `ps`, and it lands in
     # shell history and in any log that echoes the command line.
@@ -309,16 +308,16 @@ def parse_args():
                    help="2captcha.com API key (sent as a Bearer token). "
                         "Defaults to $TWOCAPTCHA_KEY, which is the safer way to pass it.")
     p.add_argument("--url", default=None,
-                   help="A mercor.com URL: a /role/… landing page, "
-                        "/jobs, or /jobs/{id}-{slug} with --mode job. Used if "
-                        "endpoint answers that for free. Required, unless "
-                        "MERCOR_URL is set in the environment or .env.")
+                   help="A mercor.com URL: work.mercor.com/explore with "
+                        "--mode listings, www.mercor.com/careers with --mode "
+                        "careers, or work.mercor.com/jobs/{id}/{slug} with "
+                        "--mode job. Required, unless MERCOR_URL is set in "
+                        "the environment or .env.")
     p.add_argument("--mode", choices=list(MODES),
                    default=DEFAULT_MODE,
-                   help="Default profile, unlike the browser engines, "
-                        "because a profile is the only page kind this path "
-                        "reads that the free endpoint cannot.")
-    p.add_argument("--category", default=None, help="Label to tag output rows with. Defaults to the category segment of the URL, so the column is never empty just because the flag was omitted.")
+                   help="Which reader to parse the page with. Same "
+                        "default as the browser engines (%s)." % DEFAULT_MODE)
+    p.add_argument("--category", default=None, help="Accepted for flag parity with the browser engines. The row has no category column (the site's own category for a listing is `domain`), so this client does not use it.")
     p.add_argument("--format", choices=["json", "csv", "both"], default="both")
     p.add_argument("--out", default="mercor_jobs_scraperapi", help="Output file prefix")
     p.add_argument("--timeout", type=int, default=60,

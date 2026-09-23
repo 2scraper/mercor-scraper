@@ -134,11 +134,6 @@ def _core_fields(mode: str):
         return CORE_FIELDS_CAREERS
     return CORE_FIELDS
 
-# A page holding less than this share of the fullest page in the same run is
-# reported as thin. A landing page holds twenty COMPANIES and however many
-# jobs they have — 32 to 45 across the captures — so the only legitimately
-# short page is the last one of a listing.
-THIN_PAGE_SHARE = 0.35
 
 PAGE_LOAD_TIMEOUT = 60
 SCRIPT_TIMEOUT = 30
@@ -174,13 +169,11 @@ class PageOutcome:
     # the figure from a comment (§13).
     urls_in_itemlist: Optional[int] = None
     pages_available: Optional[int] = None
-    # The page number the SERVER answered with, read back out of the Apollo
-    # cache key — not an echo of the request. Asking for page 48 of a
-    # 47-page listing comes back stating page 1, which is how a run learns it
-    # has walked off the end instead of silently re-collecting page 1.
+    # The page number the SERVER answered with. Always 1 here, because
+    # `/explore` has exactly one page; kept so the three engines carry the
+    # same outcome shape and so a site that starts paginating is detected
+    # rather than assumed away.
     echoed_page: Optional[int] = None
-    # The page number the SERVER answered with, read back from the response rather
-    # than echoed from the request.
 
     @property
     def ok(self) -> bool:
@@ -1044,12 +1037,9 @@ def scrape(args) -> int:
     outcomes: List[PageOutcome] = []
     seen_keys = set()
     blocked = False
-    # All three modes are one row per business-at-a-location, so `sku` is the
-    # key for all of them.
+    # All three modes are one row per listing (or careers opening), so `sku`
+    # is the key for all of them.
     dedupe_key = "sku"
-    # Only --mode profile is single-page. Both listing modes paginate
-    # identically, so neither may be treated as single-page — that is the
-    # silent-success failure this family exists to avoid.
     # `/explore` and `/careers` each hold their whole result set in one
     # response — measured, not assumed: every pagination parameter tried on
     # `/explore` returned a byte-identical payload on 2026-09-18. --mode job
@@ -1184,39 +1174,17 @@ def scrape(args) -> int:
                             if o.total_available is not None), None)
     pages_available = next((o.pages_available for o in outcomes
                             if o.pages_available is not None), None)
-    if args.mode == "role" and all_rows:
-        counts = [(o.page_num, len(o.products)) for o in outcomes if o.ok]
-        fullest = max((n for _, n in counts), default=0)
-        thin = [(p, n) for p, n in counts
-                if fullest and n < THIN_PAGE_SHARE * fullest]
-        last_page = max((p for p, _ in counts), default=0)
-        thin = [(p, n) for p, n in thin if p != last_page]
-        if thin:
-            logger.warning(
-                "Page(s) %s came back much thinner than the fullest page "
-                "(%d rows): %s. A landing page carries the jobs of twenty "
-                "companies, which varies, so this is a soft signal; a short "
-                "page that is not the last one is a truncated response.",
-                ", ".join(str(p) for p, _ in thin), fullest,
-                ", ".join("page %d: %d" % (p, n) for p, n in thin))
-        if total_available:
-            logger.info("This /explore response held %d listing(s) and this "
-                        "run holds %d of them. /explore is not everything "
-                        "Mercor publishes — 72 of the 462 listings "
-                        "enumerated on 2026-09-18 appeared only in the "
-                        "sitemap. Use --mode job to cover those.",
-                        total_available, len(all_rows))
+    if args.mode == "listings" and all_rows:
+        logger.info("--mode listings fetches everything /explore serves, and "
+                    "/explore is not everything Mercor publishes: 72 of the "
+                    "462 listings enumerated on 2026-09-18 appeared only in "
+                    "the sitemap. Use --mode job to cover them.")
 
     ok_pages = [o for o in outcomes if o.ok]
     failed_pages = [o.page_num for o in outcomes if not o.ok]
     final_url = (max(ok_pages, key=lambda o: o.page_num).final_url
                  if ok_pages else args.url)
 
-    # One-per-run context, in the sidecar rather than repeated down a column.
-    # Byte-identical in shape to the other two engines: the site's own
-    # counts, which describe the LISTING rather than any job. `total_jobs`
-    # beside `total_companies` is what stops a reader dividing rows by pages
-    # — Mercor publishes no catalogue total on any route.
     # One-per-run context, in the sidecar rather than repeated down a column,
     # and byte-identical in shape to the other two engines. Mercor states no
     # catalogue total on any route, so what goes here is this run's OWN
@@ -1281,10 +1249,11 @@ def parse_args():
                         "concept — the site's own category is the `domain` "
                         "column.")
     p.add_argument("--pages", type=int, default=1,
-                   help="Listing pages to fetch (--mode role only). A run "
-                        "plans against the `pageCount` the site states on "
-                        "page 1 and never asks past it: page 48 of a 47-page "
-                        "listing answers HTTP 200 with page 1 AGAIN.")
+                   help="Pages to fetch. Only --mode job paginates, and "
+                        "there a page is one job, planned from the sitemap "
+                        "and index enumeration and capped by its length. "
+                        "--mode listings and --mode careers have one page "
+                        "each and ignore a larger value with a log line.")
     p.add_argument("--delay", type=float, default=2.0, help="Delay between pages, seconds")
     p.add_argument("--concurrency", type=int, default=1, metavar="N",
                    help="Accepted for flag parity and IGNORED here: parallel "
