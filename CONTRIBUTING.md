@@ -116,9 +116,10 @@ Then the rest of the presentation, in the order that matters:
 file of plain functions with inline HTML/JSON fixtures — no pytest, no
 conftest, no fixtures directory. Copy the nearest existing check and edit it.
 
-Six properties in this repo exist because they were once absent or were
-measured against expectation, and cost real time. Tests pin all six, so a PR
-that breaks one will fail rather than silently regress:
+Four properties in this repo exist because they were once absent or were
+measured against expectation, and cost real time. The suite pins what an
+offline check can reach, so a PR that breaks one should fail rather than
+silently regress:
 
 - **A marker that matches every page is worse than no marker**, and this
   repo made that mistake and caught it within the hour. Mercor is fronted by
@@ -171,34 +172,6 @@ that breaks one will fail rather than silently regress:
   (`TurnstileTaskProxyless`), and this repo builds both. A detection without
   a sitekey **refuses to build a task** rather than paying for one the API
   will reject.
-
-- **Gating is per ROUTE, not per site.** `/role/…`, `/jobs` and
-  `/jobs/{id}-{slug}` are served to a residential exit; `/company/{slug}` is
-  refused to one, to plain HTTP and to a real browser alike, 3 of 3 each.
-  There is no `--mode company` and adding one would need a measurement, not
-  an idea.
-
-- **Walking past the last page does not fail — it repeats.** `?page=48` of a
-  47-page listing answers HTTP 200 carrying page 1's rows again. Two
-  defences, and the second is the one to keep: runs plan against the site's
-  own `pageCount`, and the response states which page the SERVER used inside
-  its Apollo cache key, so a mismatch is an unambiguous end-of-listing rather
-  than a "no new sku" heuristic.
-
-- **`/jobs` has no addressable pages, and `/role/…` does.** `?page=2` on the
-  feed returns the identical 46 job ids as page 1 — it does not fail and does
-  not empty. `page_flow.pagination_is_addressable()` answers per URL for
-  exactly this reason; a `page_url()` used unconditionally would report a
-  complete multi-page run holding one page several times.
-
-- **Pay is a rendered STRING, and three of its shapes break a naive
-  parser.** The `•` separates salary from equity and either side may be
-  absent (2 of 312 values are an equity range with no salary at all, so
-  taking the part before the bullet writes 0.5 into a salary column). `L` is
-  the Indian lakh, 1e5 — `₹30L – ₹80L` is 3,000,000 to 8,000,000. And
-  `No equity` is a STATEMENT: `has_equity=False` is a fact the listing
-  published, `None` is silence. `salary_period` stays null on a listing row
-  because the string carries no period; only the detail page states one.
 
 Plus the family's own invariants, which are not negotiable:
 

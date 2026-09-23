@@ -1347,11 +1347,11 @@ def check_shared_calls_bind_against_the_real_signature():
             # A name that is NOT THERE is the loudest possible failure and
             # this check used to swallow it: `getattr(..., None)` returned
             # None, `not callable(None)` was true, and the call was skipped.
-            # Three calls into a page_flow API that does not exist in this
-            # repo -- comparable(), next_page_selector(),
-            # next_page_candidates(), all of them Tokopedia's, all arriving
-            # with copied code -- sat in two engines under a green run of
-            # this very function. Absent is not "nothing to bind".
+            # In a sibling (bbb-scraper), three calls into a page_flow API
+            # that did not exist in that repo -- comparable(),
+            # next_page_selector(), next_page_candidates(), all of them
+            # tokopedia-scraper's, all arriving with copied code -- sat in
+            # two engines under a green run of this very function. Absent is not "nothing to bind".
             if not hasattr(owner, attr):
                 check("%s.%s exists (called from %s:%d)"
                       % (getattr(owner, "__name__", owner), attr,
@@ -2368,6 +2368,40 @@ def check_no_statement_is_unreachable():
                         break
         check("%s: no statement the control flow can never reach" % filename,
               not dead, "first at line %d" % min(dead) if dead else "")
+
+
+def check_diff_runs_one_source_fields_are_this_sites():
+    """The same listing read from the index and from its detail page must
+    come out as `source_changed`, not `changed`.
+
+    `DETAIL_ONLY_FIELDS` arrived from a sibling repo naming columns
+    (`equity_min`, `company_badges`, ...) that `JobPosting` does not have,
+    so the split never fired and an index-vs-detail diff reported every
+    shared listing as a change. The pair used here is the real one in
+    sample_output.json, read both ways on 2026-09-18.
+    """
+    import dataclasses
+    import diff_runs
+    from output_writer import JobPosting
+    names = {f.name for f in dataclasses.fields(JobPosting)}
+    unknown = [f for f in diff_runs.DETAIL_ONLY_FIELDS if f not in names]
+    check("diff_runs: every one-source field is a JobPosting column",
+          not unknown, "not columns: %s" % unknown)
+    rows = json.load(open(os.path.join(HERE, "sample_output.json"),
+                          encoding="utf-8"))
+    by_source = {}
+    for r in rows:
+        by_source.setdefault(r["sku"], {})[r.get("data_source")] = r
+    pairs = [v for v in by_source.values() if "explore" in v and "detail" in v]
+    check("diff_runs: sample_output holds a listing read both ways", pairs)
+    if not pairs:
+        return
+    old, new = pairs[0]["explore"], pairs[0]["detail"]
+    result = diff_runs.diff_products([old], [new])
+    check("diff_runs: index vs detail of one listing is source_changed",
+          len(result["source_changed"]) == 1 and not result["changed"],
+          "changed=%r source_changed=%r"
+          % (result["changed"], result["source_changed"]))
 
 
 def main():
