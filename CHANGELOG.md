@@ -61,6 +61,9 @@ describing those sites as if they were this one.
   client with `requests.post` stubbed; verified by control (red with the
   old client).
 
+- `SECURITY.md` said this project has no releases or version tags; it has
+  both. "Supported versions" now names the latest release and `main`.
+
 ## [0.1.0] — 2026-09-18
 
 First release. Scrapes [mercor.com](https://mercor.com) with Playwright,
