@@ -2481,6 +2481,45 @@ def check_scraper_api_payload_and_status():
           "not the API's own 'success'", status == 403, "got %r" % (status,))
 
 
+def check_no_engine_branches_on_a_mode_that_does_not_exist():
+    """No engine may branch on a mode this repo does not have.
+
+    A repo scaffolded from a sibling inherits its MODE NAMES in guards, and
+    a guard on a mode that does not exist never runs. Found here on
+    2026-09-24: puppeteer and selenium guarded the thin-page report with
+    `args.mode == "role"`, which this repo has never had, while
+    playwright_scraper.py guards the same block with "listings". The report
+    therefore ran in one engine of three.
+    """
+    import ast as _ast, glob as _glob, os as _os
+    modes = set()
+    try:
+        from output_writer import ROW_CLASS_BY_MODE
+        modes |= set(ROW_CLASS_BY_MODE)
+    except Exception:
+        pass
+    try:
+        from product_parser import ALL_MODES
+        modes |= set(ALL_MODES)
+    except Exception:
+        pass
+    check("the repo declares its modes (%s)" % sorted(modes), bool(modes))
+    root = _os.path.dirname(_os.path.abspath(__file__))
+    for path in sorted(_glob.glob(_os.path.join(root, "*_scraper.py"))):
+        eng = _os.path.basename(path)
+        tree = _ast.parse(open(path, encoding="utf-8").read(), eng)
+        ghosts = sorted({n.comparators[0].value for n in _ast.walk(tree)
+                         if isinstance(n, _ast.Compare)
+                         and isinstance(n.left, _ast.Attribute)
+                         and n.left.attr == "mode"
+                         and n.comparators
+                         and isinstance(n.comparators[0], _ast.Constant)
+                         and isinstance(n.comparators[0].value, str)
+                         and n.comparators[0].value not in modes})
+        check("%s branches only on real modes" % eng, not ghosts,
+              "ghost mode(s): %s" % ghosts if ghosts else "")
+
+
 CHECKS = [v for k, v in sorted(globals().items()) if k.startswith("check_")]
 
 

@@ -1243,7 +1243,12 @@ def scrape(args) -> int:
                             if o.total_available is not None), None)
     pages_available = next((o.pages_available for o in outcomes
                             if o.pages_available is not None), None)
-    if args.mode == "role" and all_rows:
+    # `listings`, not `role`. This read `args.mode == "role"`, and
+    # "role" is not a mode this repo has — playwright_scraper.py
+    # guards the same block with "listings" — so the thin-page
+    # report ran in one engine of three and nowhere else. A mode
+    # name inherited from the repo this was scaffolded from.
+    if args.mode == "listings" and all_rows:
         counts = [(o.page_num, len(o.products)) for o in outcomes if o.ok]
         fullest = max((n for _, n in counts), default=0)
         thin = [(p, n) for p, n in counts
