@@ -35,6 +35,7 @@ OPERATION instead, and each engine spells it in its own dialect.
 import logging
 from typing import Callable, Optional
 
+from output_writer import COMPLETE_STOP_REASONS
 from product_parser import (detect_bot_challenge,  # noqa: F401
                             detect_page_state, route_of)
 
@@ -333,6 +334,35 @@ def a_page_without_rows_ends_the_run(mode: str) -> bool:
     of intent that keeps the next paginated mode from inheriting the bug.
     """
     return mode != "job"
+
+
+ENUMERATION_INCOMPLETE = "enumeration_incomplete"
+
+
+def reconcile_stop_reason(stop_reason: str,
+                          enumeration_complete: Optional[bool]) -> str:
+    """Do not let a run that knowingly saw only part of the catalogue say "complete".
+
+    `enumeration_complete` is None outside `--mode job` (nothing was
+    enumerated), True when both sources answered, False when one did not.
+
+    A run can fetch every address it was GIVEN and still be short, because
+    the list it was given was a fallback. Every stop reason the loop itself
+    reaches (`completed`, `page_cap_reached`, …) describes the loop, and
+    says nothing about the list — so on its own it reads `complete` over
+    rows from half a catalogue. This overrides only a stop reason that was
+    about to be reported as complete: a run that already failed for a worse
+    reason (blocked, load failure) keeps that one, because it is the more
+    useful thing to tell the caller.
+
+    `enumeration_incomplete` is deliberately not in COMPLETE_STOP_REASONS, so
+    `finish_run` reports `partial` (exit 6) with the rows kept, and
+    `diff_runs.py` — which refuses a run that is not `complete` — will not
+    compare it as a full snapshot.
+    """
+    if enumeration_complete is False and stop_reason in COMPLETE_STOP_REASONS:
+        return ENUMERATION_INCOMPLETE
+    return stop_reason
 
 
 def pages_to_plan(pages_requested: int, pages_available: Optional[int]) -> int:

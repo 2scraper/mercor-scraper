@@ -89,8 +89,8 @@ from product_parser import (MODES, DEFAULT_MODE, category_from_url,
                             mode_for_url, page_url, parse_detail,
                             parse_listing_page, parse_careers_page,
                             references_own_assets, site_turnstile_sitekey,
-                            enumerate_job_urls, sitemap_job_urls,
-                            listings_from_html, route_of,
+                            enumerate_job_sources, EnumerationResult,
+                            route_of,
                             EXPLORE_URL, CAREERS_URL, SITEMAP_URL)
 from output_writer import (dedupe_by_key, finish_run, EXIT_API_ERROR,
                            SOURCE_DEFAULT)
@@ -468,54 +468,15 @@ def _plan_page_urls(args, page_one_url, pages_available, job_urls=None):
     return planned
 
 
-def _enumerate_jobs(fetch_source, args):
-    """Every job URL this run could fetch, in a stable order.
+def _enumerate_jobs(fetch_source, args) -> EnumerationResult:
+    """Every job address this run could fetch, and whether that list is whole.
 
-    The union of two sources, because **neither contains the other**.
-    Measured 2026-09-18: `/sitemap.xml` holds 447 job URLs, the `/explore`
-    payload holds 390, they share 375, and the union is 462. Three of the 72
-    sitemap-only listings were opened by hand and all three were live. A run
-    enumerating from either source alone would miss real work while
-    reporting a complete run.
-
-    `fetch_source` is a callable the ENGINE supplies, so both fetches leave
-    from the same exit as the pages they plan — a run whose sitemap came
-    from one address and whose jobs came from another is two runs wearing
-    one sidecar. It must return the serialised document rather than its
-    text: Chromium renders XML through its own viewer, and `content()` keeps
-    all 463 `<loc>` elements intact where a text reading does not.
-
-    Sitemap order leads because it is Mercor's own publication order and is
-    stable between runs, which keeps `--pages 20` fetching the SAME twenty
-    jobs each night rather than a different twenty.
+    The logic is `product_parser.enumerate_job_sources`, shared by all three
+    engines; `fetch_source` is supplied by this engine so both reads leave
+    from the same exit as the pages they plan.
     """
-    sitemap_xml = ""
-    try:
-        sitemap_xml = fetch_source(SITEMAP_URL)
-    except Exception as exc:  # noqa: BLE001 - any driver error is the same here
-        logger.warning("Could not read %s (%s). Falling back to the /explore "
-                       "payload alone, which held 390 of the 462 listings "
-                       "measured on 2026-09-18.", SITEMAP_URL, exc)
-    explore_html = ""
-    try:
-        explore_html = fetch_source(EXPLORE_URL)
-    except Exception as exc:  # noqa: BLE001
-        logger.warning("Could not read %s (%s). Falling back to the sitemap "
-                       "alone.", EXPLORE_URL, exc)
-
-    urls = enumerate_job_urls(sitemap_xml, explore_html)
-    if not urls:
-        logger.error("Neither %s nor %s yielded a single job URL, so this "
-                     "run has no work to do.", SITEMAP_URL, EXPLORE_URL)
-        return []
-    n_sitemap = len(sitemap_job_urls(sitemap_xml))
-    n_explore = len(listings_from_html(explore_html))
-    logger.info("Enumerated %d job(s): %d from the sitemap, %d in the "
-                "/explore payload, %d in both. Neither source is a superset "
-                "of the other on this site.",
-                len(urls), n_sitemap, n_explore,
-                n_sitemap + n_explore - len(urls))
-    return urls
+    return enumerate_job_sources(fetch_source, scrub=_mask_credentials,
+                                 attempts=args.retries, pause=time.sleep)
 
 
 def _parse_for_mode(html: str, url: str, args, page_num: int = 1):
@@ -1062,6 +1023,9 @@ def scrape(args) -> int:
     # the session block, so the reporting path cannot raise UnboundLocalError
     # on a run that had already done all its work.
     total_enumerated = 0
+    # How whole the enumeration was, or None when this mode enumerates
+    # nothing; bound here so the reporting path cannot raise on it.
+    enumeration = None
 
     pool = proxy_pool_from_args(args)
     if pool and args.cdp_endpoint:
@@ -1086,8 +1050,9 @@ def scrape(args) -> int:
         # content decides how many pages there are, so the order reverses.
         job_urls = []
         if args.mode == "job" and not _is_single_job_url(args):
-            job_urls = _enumerate_jobs(
+            enumeration = _enumerate_jobs(
                 lambda u: _fetch_page_source(session, u), args)
+            job_urls = enumeration.urls
             if not job_urls:
                 return finish_run(
                     [], args.out, args.format, args.allow_empty,
@@ -1217,6 +1182,8 @@ def scrape(args) -> int:
         extra["pages_available"] = pages_available
     elif args.mode == "job":
         extra["jobs_enumerated"] = total_enumerated or None
+        if enumeration is not None:
+            extra.update(enumeration.as_sidecar())
         extra["jobs_fetched"] = len(ok_pages)
         # Addresses the site answered "gone" for. A withdrawn listing is an
         # ordinary event here (the enumeration is built before any address
@@ -1231,6 +1198,10 @@ def scrape(args) -> int:
     if args.domain:
         extra["domain_filter"] = args.domain
 
+    # A run that fetched every address it was GIVEN is still short when the
+    # list it was given was a fallback — see page_flow.reconcile_stop_reason.
+    stop_reason = page_flow.reconcile_stop_reason(
+        stop_reason, None if enumeration is None else enumeration.complete)
     return finish_run(all_rows, args.out, args.format, args.allow_empty,
                       blocked=blocked, stop_reason=stop_reason,
                       pages_requested=args.pages, pages_completed=len(ok_pages),

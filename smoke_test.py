@@ -1887,12 +1887,14 @@ def check_banned_wording():
     check("banned-wording scan ran", True)
 
 
-def _drive_scrape_over_a_job_queue(engine, urls, gone, concurrency):
+def _drive_scrape_over_a_job_queue(engine, urls, gone, concurrency,
+                                   failures=()):
     """Run the REAL `scrape()` over an enumerated queue with the browser stubbed.
 
-    `gone` names the addresses the site answers 404 for. Everything else is
-    the real engine: planning, the sequential loop or the worker pool, the
-    merge, `finish_run` and the sidecar on disk.
+    `gone` names the addresses the site answers 404 for; `failures` are the
+    enumeration sources that failed (empty = both answered). Everything else
+    is the real engine: planning, the sequential loop or the worker pool,
+    the merge, `finish_run` and the sidecar on disk.
     """
     import types
     out = os.path.join(tempfile.mkdtemp(), "o")
@@ -1945,7 +1947,10 @@ def _drive_scrape_over_a_job_queue(engine, urls, gone, concurrency):
     engine._fetch_one_page = fake_fetch
     engine._BrowserSession = FakeSession
     engine.sync_playwright = lambda: FakePlaywright()
-    engine._enumerate_jobs = lambda session, a: list(urls)
+    import product_parser as _pp
+    engine._enumerate_jobs = lambda session, a: _pp.EnumerationResult(
+        urls=list(urls), sitemap_urls=len(urls), explore_records=len(urls),
+        failures=list(failures))
     try:
         code = engine.scrape(args)
     finally:
@@ -1997,6 +2002,214 @@ def check_a_withdrawn_listing_does_not_end_the_job_queue():
           page_flow.a_page_without_rows_ends_the_run("listings"))
     check("...and a job queue does not",
           not page_flow.a_page_without_rows_ends_the_run("job"))
+
+
+def check_enumeration_says_which_source_failed():
+    """The audit's second P1, on the shared function.
+
+    Neither source contains the other (sitemap 447, index 390, shared 375,
+    union 462 on 2026-09-18), so a run holding only one is a known-lossy
+    fallback and must be able to say so. A source failed in TWO ways here,
+    and the quiet one is the one a try/except does not see: it answered and
+    held nothing.
+    """
+    import product_parser as P
+    sitemap = SITEMAP_XML
+    explore = EXPLORE_HTML
+    SM, EX = P.SITEMAP_URL, P.EXPLORE_URL
+
+    both = P.enumerate_job_sources(lambda u: sitemap if u == SM else explore)
+    check("both sources answering is complete", both.complete, str(both.failures))
+    check("...and the union is bigger than either alone",
+          len(both.urls) > both.sitemap_urls and len(both.urls) > both.explore_records)
+
+    def boom(u):
+        if u == SM:
+            raise RuntimeError("net::ERR_TIMED_OUT")
+        return explore
+    lost = P.enumerate_job_sources(boom)
+    check("a RAISING sitemap makes the enumeration incomplete", not lost.complete)
+    check("...names which source and why",
+          any(f.startswith("sitemap: RuntimeError") and "ERR_TIMED_OUT" in f
+              for f in lost.failures), str(lost.failures))
+    check("...and the run still has the other source's addresses",
+          len(lost.urls) == lost.explore_records > 0)
+
+    quiet = P.enumerate_job_sources(
+        lambda u: "<urlset></urlset>" if u == SM else explore)
+    check("a sitemap that ANSWERS and holds nothing is a failure too",
+          not quiet.complete
+          and any(f.startswith("sitemap: answered but held no job URLs")
+                  for f in quiet.failures), str(quiet.failures))
+    quiet2 = P.enumerate_job_sources(
+        lambda u: sitemap if u == SM else "<html>an error shell</html>")
+    check("...and so is an index that answers and holds nothing",
+          not quiet2.complete and any(f.startswith("explore:") for f in quiet2.failures))
+
+    nothing = P.enumerate_job_sources(lambda u: (_ for _ in ()).throw(OSError("x")))
+    check("both failing leaves no addresses and says so twice",
+          nothing.urls == [] and len(nothing.failures) == 2)
+
+    # §8: an exception message is a log, and the sidecar is a file people share.
+    # Assembled from pieces: the repo's own credential scan (rightly) flags a
+    # literal `scheme://user:password@host`, including in a test about it.
+    secret = "hunter" + "2"
+    leaked = "tunnel to http://" + "u:" + secret + "@" + "exit.example:2334 failed"
+
+    def leaky(u):
+        raise RuntimeError(leaked)
+    masked = P.enumerate_job_sources(
+        leaky, scrub=lambda t: t.replace(secret, "***"))
+    check("exception text is scrubbed before it is stored",
+          secret not in json.dumps(masked.as_sidecar()),
+          json.dumps(masked.as_sidecar()))
+
+    sc = lost.as_sidecar()
+    equal("the sidecar says the enumeration was not whole",
+          sc["enumeration_complete"], False)
+    check("...with the per-source counts", sc["enumeration_sources"]["sitemap_urls"] == 0
+          and sc["enumeration_sources"]["explore_records"] > 0)
+    check("...and the failures", bool(sc["enumeration_failures"]))
+    check("a whole enumeration carries no failures key",
+          "enumeration_failures" not in both.as_sidecar())
+
+
+def check_a_flapping_source_is_retried_before_it_costs_the_run_its_status():
+    """Found live while testing the partial status itself.
+
+    A navigation still in flight aborted the NEXT enumeration read with
+    `net::ERR_ABORTED`, on a source that was perfectly healthy — and with a
+    single attempt per source that one blip would now turn a good run into a
+    `partial` (exit 6). Reporting a lost source loudly and retrying a flaky
+    one are one change, not two: either alone is wrong.
+    """
+    import product_parser as P
+    SM, EX = P.SITEMAP_URL, P.EXPLORE_URL
+    calls, naps = {"sitemap": 0, "explore": 0}, []
+
+    def flaky(u):
+        name = "sitemap" if u == SM else "explore"
+        calls[name] += 1
+        if name == "sitemap" and calls[name] < 3:
+            raise RuntimeError("net::ERR_ABORTED")
+        return SITEMAP_XML if name == "sitemap" else EXPLORE_HTML
+
+    got = P.enumerate_job_sources(flaky, attempts=3, pause=naps.append)
+    check("a source that recovers on attempt 3 leaves the run COMPLETE",
+          got.complete, str(got.failures))
+    equal("...having been tried exactly 3 times", calls["sitemap"], 3)
+    equal("...and the healthy source exactly once", calls["explore"], 1)
+    equal("...with a pause between attempts, not after the last", len(naps), 2)
+
+    calls.update(sitemap=0, explore=0)
+    def always(u):
+        calls["sitemap" if u == SM else "explore"] += 1
+        if u == SM:
+            raise RuntimeError("net::ERR_ABORTED")
+        return EXPLORE_HTML
+    dead = P.enumerate_job_sources(always, attempts=3, pause=lambda s: None)
+    check("a source that never recovers IS a failure", not dead.complete)
+    equal("...after exactly the attempts it was given", calls["sitemap"], 3)
+    check("...and the failure says how hard it was tried",
+          any("after 3 attempts" in f for f in dead.failures), str(dead.failures))
+
+    calls.update(sitemap=0, explore=0)
+    P.enumerate_job_sources(always, attempts=1)
+    equal("the default is ONE attempt, so nothing retries by accident",
+          calls["sitemap"], 1)
+
+    # An answer that is EMPTY is retried as well: a shell served mid-deploy
+    # is as transient as a dropped connection.
+    n = {"c": 0}
+    def shell_then_real(u):
+        if u == SM:
+            n["c"] += 1
+            return "<urlset></urlset>" if n["c"] == 1 else SITEMAP_XML
+        return EXPLORE_HTML
+    check("an empty answer that fills on retry is not a failure",
+          P.enumerate_job_sources(shell_then_real, attempts=2).complete)
+
+    # Both engines must actually pass their --retries budget through.
+    for module in ENGINES:
+        path = os.path.join(HERE, module + ".py")
+        if os.path.exists(path):
+            check("%s hands its --retries budget to the enumeration" % module,
+                  "attempts=args.retries" in open(path, encoding="utf-8").read())
+
+
+def check_a_lost_source_makes_the_run_partial_not_complete():
+    """Through the real `scrape()`, both paths.
+
+    Reproduced on the audited commit: the sitemap raising, the index holding
+    7 records, 100 pages asked for -> 7 rows, `status: complete`, exit 0,
+    `page_cap_reached`. The warning was in a log; the sidecar said nothing.
+
+    Now: the rows are KEPT (they are real), the status is `partial`, exit 6,
+    the stop reason is `enumeration_incomplete`, and the failure is in the
+    sidecar — which also makes `diff_runs.py` refuse to treat it as a full
+    snapshot, since it refuses anything that is not `complete`.
+    """
+    engine = _import_engine("playwright_scraper")
+    if engine is None:
+        return
+    import page_flow
+    U = ["https://work.mercor.com/jobs/list_AAA/a",
+         "https://work.mercor.com/jobs/list_BBB/b",
+         "https://work.mercor.com/jobs/list_CCC/c"]
+    for concurrency in (1, 2):
+        tag = "concurrency %d" % concurrency
+        code, rows, meta = _drive_scrape_over_a_job_queue(
+            engine, U, set(), concurrency,
+            failures=["sitemap: RuntimeError: net::ERR_TIMED_OUT"])
+        equal("%s: every address it WAS given is fetched" % tag, len(rows), 3)
+        equal("%s: but the run is PARTIAL" % tag, meta["status"], "partial")
+        equal("%s: exit 6" % tag, code, 6)
+        equal("%s: the stop reason names the cause" % tag,
+              meta["stop_reason"], page_flow.ENUMERATION_INCOMPLETE)
+        equal("%s: the sidecar says the enumeration was not whole" % tag,
+              meta.get("enumeration_complete"), False)
+        check("%s: ...and why" % tag,
+              any("sitemap" in f for f in meta.get("enumeration_failures", [])),
+              str(meta.get("enumeration_failures")))
+
+    code, rows, meta = _drive_scrape_over_a_job_queue(engine, U, set(), 1)
+    equal("a whole enumeration is still complete", meta["status"], "complete")
+    equal("...and says so", meta.get("enumeration_complete"), True)
+
+    # The decision, on its own. A worse failure must not be hidden by it.
+    r = page_flow.reconcile_stop_reason
+    equal("a run about to be 'complete' is overridden",
+          r("page_cap_reached", False), page_flow.ENUMERATION_INCOMPLETE)
+    equal("...also 'completed'", r("completed", False), page_flow.ENUMERATION_INCOMPLETE)
+    equal("a blocked run keeps its worse reason", r("blocked_x", False), "blocked_x")
+    equal("a whole enumeration changes nothing", r("completed", True), "completed")
+    equal("a mode that enumerates nothing changes nothing",
+          r("single_page_route", None), "single_page_route")
+    check("enumeration_incomplete is NOT a complete stop reason",
+          page_flow.ENUMERATION_INCOMPLETE not in
+          __import__("output_writer").COMPLETE_STOP_REASONS)
+
+
+def check_every_engine_reconciles_and_reports_the_enumeration():
+    """A fix that reaches one engine of three is the drift page_flow exists
+    to prevent, and the mirrors' `scrape()` cannot be driven offline without
+    their libraries — so this is pinned by source, per engine.
+    """
+    for module in ENGINES:
+        path = os.path.join(HERE, module + ".py")
+        if not os.path.exists(path):
+            continue
+        src = open(path, encoding="utf-8").read()
+        equal("%s reconciles the stop reason against the enumeration" % module,
+              src.count("page_flow.reconcile_stop_reason("), 1)
+        equal("%s writes the enumeration into the sidecar" % module,
+              src.count("enumeration.as_sidecar()"), 1)
+        check("%s reads the enumeration through the shared function" % module,
+              "enumerate_job_sources(" in src,
+              "a private copy of the logic is how three engines drift")
+        check("%s no longer swallows a failed source into a warning" % module,
+              "Falling back to the" not in src,
+              "the pre-fix per-engine fallback text is back")
 
 
 def check_every_engine_asks_the_shared_policy_before_ending_a_queue():
