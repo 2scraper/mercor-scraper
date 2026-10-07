@@ -337,31 +337,68 @@ def a_page_without_rows_ends_the_run(mode: str) -> bool:
 
 
 ENUMERATION_INCOMPLETE = "enumeration_incomplete"
+PARSER_FOUND_NOTHING = "parser_found_nothing"
+
+
+def account_for_pages(outcomes):
+    """(read, failed page numbers, unreadable page numbers) — one place.
+
+    Three engines each computed `ok` and `failed` inline, and "ok" meant "no
+    load failure and no block". That left a hole this closes: a page the
+    site SERVED but this parser could not read (`parse_error`) was `ok`,
+    counted as completed, and contributed nothing — so a run whose every
+    page was unreadable had `pages_completed == pages_requested`, no failed
+    pages, and `finish_run` took the zero rows for an empty catalogue
+    (exit 4). In `--mode job` the same page simply vanished from a run that
+    went on to report `complete`.
+
+    An unreadable page is a FAILED page, by number (CLAUDE.md §8: which
+    pages, not how many), so `finish_run` sees `not complete` and the
+    zero-row case becomes exit 5 — "nothing was gathered, nothing can be
+    concluded" — instead of exit 4's claim that the answer was nothing.
+    """
+    unreadable = sorted(o.page_num for o in outcomes
+                        if o.ok and o.state == "parse_error")
+    read = [o for o in outcomes if o.ok and o.state != "parse_error"]
+    failed = sorted({o.page_num for o in outcomes if not o.ok}
+                    | set(unreadable))
+    return read, failed, unreadable
 
 
 def reconcile_stop_reason(stop_reason: str,
-                          enumeration_complete: Optional[bool]) -> str:
-    """Do not let a run that knowingly saw only part of the catalogue say "complete".
+                          enumeration_complete: Optional[bool],
+                          unreadable_pages=()) -> str:
+    """Do not let a run that knowingly saw only part of the picture say "complete".
 
     `enumeration_complete` is None outside `--mode job` (nothing was
     enumerated), True when both sources answered, False when one did not.
+    `unreadable_pages` are pages the site served and the parser could not
+    read (see `account_for_pages`).
 
     A run can fetch every address it was GIVEN and still be short, because
-    the list it was given was a fallback. Every stop reason the loop itself
-    reaches (`completed`, `page_cap_reached`, …) describes the loop, and
-    says nothing about the list — so on its own it reads `complete` over
-    rows from half a catalogue. This overrides only a stop reason that was
-    about to be reported as complete: a run that already failed for a worse
-    reason (blocked, load failure) keeps that one, because it is the more
-    useful thing to tell the caller.
+    the list it was given was a fallback, or because some pages parsed to
+    nothing. Every stop reason the loop itself reaches (`completed`,
+    `page_cap_reached`, …) describes the loop, and says nothing about either
+    — so on its own it reads `complete` over rows from part of the catalogue.
+    This overrides only a stop reason that was about to be reported as
+    complete: a run that already failed for a worse reason (blocked, load
+    failure) keeps that one, because it is the more useful thing to tell the
+    caller.
 
-    `enumeration_incomplete` is deliberately not in COMPLETE_STOP_REASONS, so
-    `finish_run` reports `partial` (exit 6) with the rows kept, and
-    `diff_runs.py` — which refuses a run that is not `complete` — will not
+    Unreadable pages win over an incomplete enumeration when both hold,
+    because they name a defect in THIS code rather than a condition of the
+    site; the sidecar still carries the enumeration failure beside it.
+
+    Neither result is in COMPLETE_STOP_REASONS, so `finish_run` reports
+    `partial` (exit 6) with the rows kept — or exit 5 with none — and
+    `diff_runs.py`, which refuses a run that is not `complete`, will not
     compare it as a full snapshot.
     """
-    if enumeration_complete is False and stop_reason in COMPLETE_STOP_REASONS:
-        return ENUMERATION_INCOMPLETE
+    if stop_reason in COMPLETE_STOP_REASONS:
+        if unreadable_pages:
+            return PARSER_FOUND_NOTHING
+        if enumeration_complete is False:
+            return ENUMERATION_INCOMPLETE
     return stop_reason
 
 

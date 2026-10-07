@@ -1554,6 +1554,44 @@ def bounced_to_login(url: str) -> bool:
     return bool(_LOGIN_BOUNCE_RE.match(path))
 
 
+def expected_container_present(payload: Any, mode: str) -> bool:
+    """Whether the payload holds the PLACE the records would be, empty or not.
+
+    `listings_from_next_data` returns [] both for a genuinely empty index and
+    for a payload whose key was renamed, because it looks the key up and
+    shrugs when it is missing. Those are different facts and want different
+    answers: the first is the site saying "nothing here" (exit 4), the second
+    is this parser failing to read a page the site served. Renaming
+    `listings` to `listingsV2` in a real capture reproduced it on the audited
+    commit: `empty`, zero rows, indistinguishable from a real empty index.
+
+    So presence is asked SEPARATELY from length (CLAUDE.md §20: a page that
+    was served and parses to zero rows is your bug, and must not read as an
+    empty category):
+
+      listings  some query's `data.listings` is a list (even `[]`)
+      careers   `pageProps.jobs` is a list (even `[]`)
+      job       one of `role` / `poolListing` / `closedListing` is a KEY of
+                `pageProps` — a listing the site has taken down may carry
+                all three as null, which is the site speaking; none of them
+                existing is the shape having moved.
+    """
+    if not isinstance(payload, dict):
+        return False
+    props = (payload.get("props") or {}).get("pageProps")
+    if not isinstance(props, dict):
+        return False
+    if mode == "careers":
+        return isinstance(props.get("jobs"), list)
+    if mode == "job":
+        return any(k in props for k in ("role", "poolListing", "closedListing"))
+    for query in (props.get("dehydratedState") or {}).get("queries") or []:
+        data = ((query or {}).get("state") or {}).get("data")
+        if isinstance(data, dict) and isinstance(data.get("listings"), list):
+            return True
+    return False
+
+
 def detect_page_state(html: Optional[str], status: Optional[int] = None,
                       url: str = "", mode: str = DEFAULT_MODE) -> str:
     """Name what Mercor answered with.
@@ -1629,7 +1667,22 @@ def detect_page_state(html: Optional[str], status: Optional[int] = None,
         return "unknown"
 
     if payload is not None:
-        # Served, readable, and it told us there is nothing here.
+        # Served and parsed. Whether it told us there is nothing here, or we
+        # simply could not find where the records would be, is the whole
+        # difference between exit 4 and a parser that needs fixing — and it
+        # used to be decided by `payload is not None` alone.
+        if not expected_container_present(payload, mode):
+            return "parse_error"
+        if mode == "listings" and itemlist_urls(text):
+            # The response contradicts itself: the structured data indexes
+            # jobs while the payload holds none. Mercor states no catalogue
+            # total, but this is the same arithmetic as a served page
+            # inside its own total (CLAUDE.md §26) — a claim of "empty" that
+            # the page itself disproves. Measured 2026-10-07: 237 ItemList
+            # urls beside 305 payload records, so on a healthy page the
+            # JSON-LD is the SMALLER view, never a non-empty one beside an
+            # empty payload.
+            return "parse_error"
         return "empty"
 
     if len(text) > 2000:

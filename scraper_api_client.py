@@ -242,7 +242,13 @@ def _run_once(args, attempt: int = 1, attempts: int = 1) -> int:
 
     # Same policy as the browser engines: the status decides the blocked
     # case, because this site's refusal has no marker to detect.
-    state = detect_page_state(html, status=upstream_status, url=args.url)
+    # `mode=` matters: without it the page is judged as a LISTING whatever
+    # was asked for, so a perfectly good detail page — which holds no
+    # `listings` — reads as a page whose records went missing. The browser
+    # engines pass it; this client did not, the same omission the mirror
+    # engines had.
+    state = detect_page_state(html, status=upstream_status, url=args.url,
+                              mode=args.mode)
     if state == "blocked":
         dump = f"{args.out}_scraperapi_debug.html"
         with open(dump, "w", encoding="utf-8") as f:
@@ -297,6 +303,17 @@ def _run_once(args, attempt: int = 1, attempts: int = 1) -> int:
             f.write(html)
         logger.warning("0 jobs parsed — saved the raw response to %s so "
                        "you can see what actually came back.", dump)
+        if state == "parse_error":
+            # Served, and this parser could not find where the records would
+            # be (or the page contradicts itself). That is NOT "the listing
+            # is empty": exit 4 would tell a pipeline the site had nothing,
+            # when nothing can be concluded about the site from this run. It
+            # is exit 5, the same number the browser engines give it.
+            logger.error("The page was served but the reader could not find "
+                         "the records in it — exit %d, NOT an empty result "
+                         "(exit 4). The saved response shows what changed.",
+                         EXIT_API_ERROR)
+            return EXIT_API_ERROR
         return 4
 
     return save(products, args.out, args.format, allow_empty=args.allow_empty)

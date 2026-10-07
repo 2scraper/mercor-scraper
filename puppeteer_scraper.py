@@ -799,7 +799,7 @@ def _fetch_one_page(session, args, pool, page_num: int, url: str) -> PageOutcome
                                    args.retries, text[:120], pause)
                     time.sleep(pause)
 
-        if load_failed and block_attempt < block_retries:
+        if load_failed and has_pool and block_attempt < block_retries:
             pool.advance("unusable exit or repeated load failure")
             session.relaunch()
             bridge, page = session.bridge, session.page
@@ -886,13 +886,31 @@ def _fetch_one_page(session, args, pool, page_num: int, url: str) -> PageOutcome
         # so a different exit is the only thing that plausibly changes the
         # outcome.
         if block_attempt < block_retries:
-            logger.warning("Page %d came back as %s from %s — retrying from "
-                           "another exit (%d/%d).", page_num, state,
-                           mask(pool.current), block_attempt + 1, block_retries)
-            pool.advance(f"{state} on page {page_num}")
-            session.relaunch()
-            bridge, page = session.bridge, session.page
-            d = _driver(session)
+            if has_pool:
+                logger.warning("Page %d came back as %s from %s — retrying "
+                               "from another exit (%d/%d).", page_num, state,
+                               mask(pool.current), block_attempt + 1,
+                               block_retries)
+                pool.advance(f"{state} on page {page_num}")
+                session.relaunch()
+                bridge, page = session.bridge, session.page
+                d = _driver(session)
+            else:
+                # No pool, so nowhere else to go — but a plain re-fetch is
+                # what clears this on a Scraping Browser profile. The browser
+                # is NOT relaunched: over `--cdp-endpoint` a profile allows
+                # one live connection, so tearing the session down and
+                # reconnecting risks `profile_locked`. Mirrors the Playwright
+                # engine, whose branch this was missing: with no `--proxy`
+                # the line above dereferenced `pool.current` on None and the
+                # run died with AttributeError — on any retryable page state,
+                # which no live run had reached until a page was unreadable.
+                pause = args.retry_delay * (block_attempt + 1)
+                logger.warning("Page %d came back as %s — re-fetching through "
+                               "the same access path in %.1fs (%d/%d).",
+                               page_num, state, pause, block_attempt + 1,
+                               block_retries)
+                time.sleep(pause)
 
     if load_failed:
         # NAME the proxy when it was the proxy. A dead exit and
@@ -1225,8 +1243,8 @@ def scrape(args) -> int:
                     "462 listings enumerated on 2026-09-18 appeared only in "
                     "the sitemap. Use --mode job to cover them.")
 
-    ok_pages = [o for o in outcomes if o.ok]
-    failed_pages = [o.page_num for o in outcomes if not o.ok]
+    ok_pages, failed_pages, unreadable_pages = page_flow.account_for_pages(
+        outcomes)
     final_url = (max(ok_pages, key=lambda o: o.page_num).final_url
                  if ok_pages else args.url)
 
@@ -1237,6 +1255,10 @@ def scrape(args) -> int:
     indexed = next((o.urls_in_itemlist for o in outcomes
                     if o.urls_in_itemlist is not None), None)
     extra = {"route_is_paginated": args.mode == "job", "mode": args.mode}
+    if unreadable_pages:
+        # Pages the site served and this parser could not read — by number,
+        # so the loss is a list a reader can act on rather than a count.
+        extra["pages_unreadable"] = unreadable_pages
     if args.mode == "listings":
         extra["records_in_payload"] = total_available
         extra["urls_in_itemlist"] = indexed
@@ -1262,7 +1284,8 @@ def scrape(args) -> int:
     # A run that fetched every address it was GIVEN is still short when the
     # list it was given was a fallback — see page_flow.reconcile_stop_reason.
     stop_reason = page_flow.reconcile_stop_reason(
-        stop_reason, None if enumeration is None else enumeration.complete)
+        stop_reason, None if enumeration is None else enumeration.complete,
+        unreadable_pages)
     return finish_run(all_rows, args.out, args.format, args.allow_empty,
                       blocked=blocked, stop_reason=stop_reason,
                       pages_requested=args.pages, pages_completed=len(ok_pages),

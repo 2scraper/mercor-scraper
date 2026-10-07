@@ -1757,8 +1757,8 @@ def scrape(args) -> int:
                     "" if done >= total_enumerated
                     else "  Pass --pages %d to cover the rest." % total_enumerated)
 
-    ok_pages = [o for o in outcomes if o.ok]
-    failed_pages = [o.page_num for o in outcomes if not o.ok]
+    ok_pages, failed_pages, unreadable_pages = page_flow.account_for_pages(
+        outcomes)
     final_url = (max(ok_pages, key=lambda o: o.page_num).final_url
                  if ok_pages else args.url)
 
@@ -1771,6 +1771,10 @@ def scrape(args) -> int:
     # of the file inheriting a number from a README that was measured on
     # some other day.
     extra = {"route_is_paginated": args.mode == "job", "mode": args.mode}
+    if unreadable_pages:
+        # Pages the site served and this parser could not read — by number,
+        # so the loss is a list a reader can act on rather than a count.
+        extra["pages_unreadable"] = unreadable_pages
     if args.mode == "listings":
         extra["records_in_payload"] = total_available
         extra["urls_in_itemlist"] = indexed
@@ -1796,7 +1800,8 @@ def scrape(args) -> int:
     # A run that fetched every address it was GIVEN is still short when the
     # list it was given was a fallback — see page_flow.reconcile_stop_reason.
     stop_reason = page_flow.reconcile_stop_reason(
-        stop_reason, None if enumeration is None else enumeration.complete)
+        stop_reason, None if enumeration is None else enumeration.complete,
+        unreadable_pages)
     return finish_run(all_rows, args.out, args.format, args.allow_empty,
                       blocked=blocked, stop_reason=stop_reason,
                       pages_requested=args.pages, pages_completed=len(ok_pages),
