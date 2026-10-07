@@ -75,6 +75,7 @@ import sys
 from typing import Dict, List, Optional, Tuple
 
 from output_writer import UNIQUE_BY_SKU_MODES
+from product_parser import CAREERS_URL, EXPLORE_URL, canonical_url
 
 # What is worth watching on a Mercor listing, and nothing else.
 #
@@ -240,9 +241,23 @@ def diff_products(old: List[dict], new: List[dict]) -> dict:
 
 
 def _print_summary(result: dict) -> None:
-    print(f"[+] {len(result['added'])} added, {len(result['removed'])} removed, "
-          f"{len(result['changed'])} changed, "
-          f"{len(result['source_changed'])} not comparable across run kinds.")
+    bounded = result.get("selection_bounded")
+    if bounded:
+        # A slice moved; nothing here has been shown to be listed or
+        # withdrawn. Said in the headline, because a reader who sees "N
+        # removed" stops there.
+        print(f"[+] {len(result['added'])} entered the slice, "
+              f"{len(result['removed'])} left it, "
+              f"{len(result['changed'])} changed, "
+              f"{len(result['source_changed'])} not comparable across run "
+              f"kinds.  ({' and '.join(bounded)} fetched fewer jobs than it "
+              f"enumerated, so entered/left says where the SLICE moved, not "
+              f"that a listing was added or withdrawn.)")
+    else:
+        print(f"[+] {len(result['added'])} added, {len(result['removed'])} "
+              f"removed, {len(result['changed'])} changed, "
+              f"{len(result['source_changed'])} not comparable across run "
+              f"kinds.")
     for p in result["added"]:
         print(f"  + {p.get('sku')}  {p.get('title')}  "
               f"@ {p.get('company_name') or '?'}  "
@@ -285,6 +300,62 @@ def _run_status(path: str) -> Tuple[Optional[str], Optional[dict]]:
     return meta.get("status"), meta
 
 
+# What a run SELECTED, as its sidecar records it. Two complete runs that
+# selected different things are both genuinely complete and still not
+# comparable: `--domain Finance` against `--domain Law` is two different
+# slices of the index, and every listing in one that is not in the other would
+# be reported as added or removed when nothing about the SITE changed. This is
+# the audit's P2 — `domain_filter` was written into the sidecar by this very
+# repo and never read back.
+SELECTION_KEYS = ("mode", "domain_filter", "start_url")
+
+
+def _normal_start_url(mode, url):
+    """The address a run started on, with "no --url" meaning the mode's own.
+
+    A listings run with no `--url` and one given `--url
+    https://work.mercor.com/explore` selected exactly the same thing, and
+    recording `None` for one and the string for the other must not make them
+    look different.
+    """
+    if url:
+        try:
+            return canonical_url(url)
+        except Exception:  # noqa: BLE001 - an unparseable URL compares as itself
+            return url
+    return {"listings": EXPLORE_URL, "careers": CAREERS_URL}.get(mode)
+
+
+def _selection(meta: Optional[dict]) -> dict:
+    meta = meta or {}
+    return {"mode": meta.get("mode"),
+            "domain_filter": ((meta.get("domain_filter") or "").strip().lower()
+                              or None),
+            "start_url": _normal_start_url(meta.get("mode"),
+                                           meta.get("start_url"))}
+
+
+def _bounded(meta: Optional[dict]) -> bool:
+    """Whether a `--mode job` run fetched fewer jobs than it enumerated.
+
+    That run is a SLICE, and what a slice contains is decided by `--pages`
+    and the order of the sitemap — so a listing absent from it has not been
+    shown to be gone.
+    """
+    meta = meta or {}
+    enumerated, fetched = meta.get("jobs_enumerated"), meta.get("jobs_fetched")
+    return bool(enumerated and fetched and fetched < enumerated)
+
+
+def _bounded_runs(args) -> List[str]:
+    out = []
+    for label, path in (("--old", args.old), ("--new", args.new)):
+        _, meta = _run_status(path)
+        if _bounded(meta):
+            out.append(label)
+    return out
+
+
 def _check_comparable(args) -> bool:
     """Refuse an assortment diff between runs that are not both complete.
 
@@ -297,10 +368,26 @@ def _check_comparable(args) -> bool:
     """
     problems = []
     modes = {}
+    metas = {}
     for label, path in (("--old", args.old), ("--new", args.new)):
         status, meta = _run_status(path)
         if status is None:
-            continue  # no sidecar: nothing to check, see _run_status
+            # NOT "nothing to check". A run with no sidecar cannot be told
+            # from a partial one, and the family refuses to diff a partial
+            # run because its un-fetched pages read as delisted listings
+            # (CLAUDE.md §8). Letting an unverifiable run through is the
+            # same hole by another door.
+            #
+            # This used to be waved through because the Scraper API client
+            # wrote rows and no sidecar. It writes one now, so the refusal
+            # is something the user can act on rather than a defect of ours.
+            problems.append(
+                f"{label} ({path}) has no .meta.json beside it, so whether it "
+                f"is a complete run cannot be checked. Output written before "
+                f"run metadata existed (or by hand) lands here; re-run it, or "
+                f"pass --force if you know it is complete.")
+            continue
+        metas[label] = meta or {}
         mode = (meta or {}).get("mode")
         if mode:
             modes[label] = mode
@@ -341,6 +428,19 @@ def _check_comparable(args) -> bool:
                 f"`domain` and the slot counters, a detail row has the "
                 f"company website and a currency — so `added`/`removed` "
                 f"would describe the mode change rather than the catalogue.")
+
+    # The two runs must have selected the same thing. Compared AFTER the mode
+    # check so a mode difference is reported once, as the mode difference it is.
+    if len(metas) == 2 and len(set(modes.values())) <= 1:
+        a, b = _selection(metas["--old"]), _selection(metas["--new"])
+        differing = {k: (a[k], b[k]) for k in SELECTION_KEYS if a[k] != b[k]}
+        if differing:
+            problems.append(
+                "the two runs selected different things, so `added` and "
+                "`removed` would describe the selection and not the "
+                "marketplace: "
+                + "; ".join(f"{k}: {x!r} vs {y!r}"
+                            for k, (x, y) in differing.items()))
 
     # NO SORT GUARD, and that absence is a measurement rather than an
     # omission. A sibling repo in this family needs one because its default
@@ -426,6 +526,9 @@ def main() -> int:
         return 2
 
     result = diff_products(old, new)
+    bounded = _bounded_runs(args)
+    if bounded:
+        result["selection_bounded"] = bounded
     _print_summary(result)
 
     if args.out:
@@ -438,7 +541,13 @@ def main() -> int:
     # them fills differ. That says something about our own two snapshots
     # rather than about the job, and alerting on it would train whoever
     # reads the alert to ignore it.
-    if args.fail_on_change and (result["added"] or result["removed"] or result["changed"]):
+    #
+    # Nor is movement of a SLICE: when a run fetched fewer jobs than it
+    # enumerated, "entered" and "left" describe where `--pages` and the
+    # sitemap order put the cut, and a cron job that pages someone for that
+    # is paging them for its own configuration.
+    moved = [] if bounded else (result["added"] + result["removed"])
+    if args.fail_on_change and (moved or result["changed"]):
         return 1
     return 0
 

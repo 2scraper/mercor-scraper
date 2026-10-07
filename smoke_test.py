@@ -2373,6 +2373,162 @@ def check_no_engine_dereferences_a_pool_that_may_not_exist():
               "found %d" % sites)
 
 
+def _write_run(directory, name, rows, **meta):
+    """A run on disk: rows plus the sidecar `finish_run` would write."""
+    base = {"source": "mercor.com", "mode": "listings", "status": "complete",
+            "stop_reason": "single_page_route", "pages_requested": 1,
+            "pages_completed": 1, "pages_failed": [], "products": len(rows),
+            "start_url": None}
+    base.update(meta)
+    path = os.path.join(directory, name + ".json")
+    json.dump(rows, open(path, "w", encoding="utf-8"))
+    if base.get("_no_sidecar"):
+        return path
+    json.dump({k: v for k, v in base.items() if not k.startswith("_")},
+              open(os.path.join(directory, name + ".meta.json"), "w",
+                   encoding="utf-8"))
+    return path
+
+
+def _run_diff(old, new, *flags):
+    import contextlib
+    import diff_runs
+    buf = io.StringIO()
+    saved = list(sys.argv)
+    sys.argv = ["diff_runs.py", "--old", old, "--new", new] + list(flags)
+    try:
+        with contextlib.redirect_stdout(buf):
+            code = diff_runs.main()
+    finally:
+        sys.argv = saved
+    return code, buf.getvalue()
+
+
+def check_diff_compares_the_whole_selection_and_demands_a_sidecar():
+    """The audit's P2 on diff_runs, in the parts it was right about.
+
+    Two COMPLETE listings runs under different `--domain` filters were
+    accepted as comparable (2 added, 2 removed, exit 0, no refusal) because
+    this repo wrote `domain_filter` into the sidecar and never read it back.
+    And a run with no sidecar passed silently, because "nothing to check".
+    """
+    d = tempfile.mkdtemp()
+    A = [{"sku": "list_A", "title": "a", "domain": "Finance"}]
+    B = [{"sku": "list_B", "title": "b", "domain": "Law"}]
+
+    old = _write_run(d, "fin", A, domain_filter="Finance")
+    new = _write_run(d, "law", B, domain_filter="Law")
+    code, out = _run_diff(old, new)
+    equal("different --domain filters are refused", code, 2)
+    check("...naming the differing key and both values",
+          "domain_filter" in out and "'finance'" in out and "'law'" in out, out)
+    code, out = _run_diff(old, new, "--force")
+    equal("--force still lets someone compare them", code, 0)
+
+    same = _write_run(d, "fin2", A, domain_filter=" FINANCE ")
+    code, out = _run_diff(old, same)
+    equal("the same filter, spelled differently, is the same selection", code, 0)
+
+    # "no --url" and an explicit --url of the mode's own route are one selection.
+    import product_parser as P
+    dflt = _write_run(d, "dflt", A)
+    expl = _write_run(d, "expl", A, start_url=P.EXPLORE_URL)
+    code, out = _run_diff(dflt, expl)
+    equal("no --url and the mode's own --url are the SAME selection", code, 0)
+    other = _write_run(d, "other", A, mode="job", stop_reason="completed",
+                       start_url="https://work.mercor.com/jobs/list_X/y")
+    _, out = _run_diff(dflt, other)
+    check("a different mode is still reported as a mode difference",
+          "different modes" in out or "different POPULATIONS" in out, out)
+
+    # ---- the sidecar ------------------------------------------------------
+    bare = _write_run(d, "bare", A, _no_sidecar=True)
+    code, out = _run_diff(bare, dflt)
+    equal("a run with NO sidecar is refused", code, 2)
+    check("...and the refusal says what is missing and how to proceed",
+          ".meta.json" in out and "--force" in out, out)
+    code, out = _run_diff(bare, dflt, "--force")
+    equal("...but --force still compares it", code, 0)
+    both_bare = _write_run(d, "bare2", A, _no_sidecar=True)
+    code, _ = _run_diff(bare, both_bare)
+    equal("two sidecar-less runs are refused too", code, 2)
+
+    # A partial run is still refused, as before.
+    part = _write_run(d, "part", A, status="partial",
+                      stop_reason="enumeration_incomplete")
+    code, out = _run_diff(dflt, part)
+    equal("a partial run is still refused", code, 2)
+
+
+def check_a_bounded_run_reports_the_slice_moving_not_listings_leaving():
+    """`removed` was being said about listings that were merely not fetched.
+
+    A `--mode job --pages 5` run holds the first five addresses of 462; a
+    listing absent from it has not been shown to be gone. The relabelling is
+    in the headline because a reader who sees "N removed" stops there, and
+    `--fail-on-change` must not fire for it: a cron job that pages someone
+    when `--pages` moved the cut is paging them about its own configuration.
+    """
+    d = tempfile.mkdtemp()
+    full = [{"sku": "list_%d" % i, "title": "t%d" % i} for i in range(6)]
+    cut = full[:3]
+    job = dict(mode="job", stop_reason="completed")
+    old = _write_run(d, "o", full, jobs_enumerated=6, jobs_fetched=6, **job)
+    new = _write_run(d, "n", cut, jobs_enumerated=6, jobs_fetched=3, **job)
+
+    code, out = _run_diff(old, new)
+    headline = next((l for l in out.splitlines() if l.startswith("[+]")), "")
+    check("a bounded run says 'left the slice', not 'removed'",
+          "left it" in headline and " removed" not in headline, headline)
+    check("...and explains why in the same line",
+          "fetched fewer jobs" in headline, headline)
+    equal("movement of a SLICE does not fail --fail-on-change",
+          _run_diff(old, new, "--fail-on-change")[0], 0)
+
+    # The same two runs, both whole: a real removal MUST still fail it.
+    new_whole = _write_run(d, "nw", cut, jobs_enumerated=3, jobs_fetched=3, **job)
+    code, out = _run_diff(old, new_whole, "--fail-on-change")
+    equal("a genuine removal between two whole runs still fails it", code, 1)
+    headline = next((l for l in out.splitlines() if l.startswith("[+]")), "")
+    check("...and is still called a removal",
+          " removed" in headline and "left it" not in headline, headline)
+
+    # A real CHANGE on a shared sku is real whether or not a slice moved.
+    changed = [dict(full[0], title="renamed")] + full[1:3]
+    new_c = _write_run(d, "nc", changed, jobs_enumerated=6, jobs_fetched=3, **job)
+    equal("a change to a listing in both runs fails it even when bounded",
+          _run_diff(old, new_c, "--fail-on-change")[0], 1)
+
+
+def check_the_scraper_api_client_writes_the_sidecar_diff_now_requires():
+    """The order matters, and it was the order the audit's proposal had wrong.
+
+    Requiring a sidecar before this client wrote one would have refused every
+    diff of its output for a reason that is the client's defect, not the
+    user's. So the client changed first, and this pins that it stays so.
+    """
+    import types
+    import scraper_api_client as C
+    out = os.path.join(tempfile.mkdtemp(), "o")
+    args = types.SimpleNamespace(
+        url="https://work.mercor.com/explore", mode="listings", out=out,
+        format="json", allow_empty=False, dump_html=None, key="k",
+        retries=0, retry_delay=0)
+    real = C.fetch_html
+    C.fetch_html = lambda a: (EXPLORE_HTML, 200)
+    try:
+        code = C._run_once(args)
+    finally:
+        C.fetch_html = real
+    equal("the client runs", code, 0)
+    check("...and writes a sidecar", os.path.exists(out + ".meta.json"))
+    meta = json.load(open(out + ".meta.json", encoding="utf-8"))
+    equal("...saying what it is", (meta["mode"], meta["status"]),
+          ("listings", "complete"))
+    code, text = _run_diff(out + ".json", out + ".json")
+    equal("so its own output diffs against itself", code, 0)
+
+
 def check_a_lost_source_makes_the_run_partial_not_complete():
     """Through the real `scrape()`, both paths.
 

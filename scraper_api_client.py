@@ -48,7 +48,6 @@ from product_parser import (BOT_CHALLENGE_MARKERS, MODES, DEFAULT_MODE,
                             detect_bot_challenge, detect_page_state,
                             parse_page, parse_detail, is_supported_url,
                             mode_for_url, EXPLORE_URL, CAREERS_URL)
-from output_writer import save
 import env_config
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
@@ -69,7 +68,8 @@ MAX_API_TIMEOUT = 120
 # Imported rather than redefined: the browser engines return the same code for
 # a Scraping Browser that will not accept a connection, and two definitions
 # of one exit code is how a family's contract drifts.
-from output_writer import EXIT_API_ERROR  # noqa: E402
+from output_writer import (EXIT_API_ERROR, SOURCE_DEFAULT,  # noqa: E402
+                           finish_run)
 
 def _mask_credentials(url: str) -> str:
     """Never print a username:password embedded in a ws://... or http://... URL."""
@@ -316,7 +316,22 @@ def _run_once(args, attempt: int = 1, attempts: int = 1) -> int:
             return EXIT_API_ERROR
         return 4
 
-    return save(products, args.out, args.format, allow_empty=args.allow_empty)
+    # Through `finish_run`, not a bare `save`. This client used to write rows
+    # and NO sidecar, which was true and defensible while nothing depended on
+    # one — and then `diff_runs.py` needed to REQUIRE one, because a run whose
+    # completeness cannot be verified cannot be told from a partial one, and
+    # the family refuses to diff those. The requirement could not be made
+    # until this client wrote what it requires, or every diff of its output
+    # would have been refused for a reason that is the client's, not the
+    # user's.
+    return finish_run(products, args.out, args.format, args.allow_empty,
+                      blocked=False,
+                      stop_reason=("single_page_route"
+                                   if args.mode in ("listings", "careers")
+                                   else "completed"),
+                      pages_requested=1, pages_completed=1,
+                      mode=args.mode, source=SOURCE_DEFAULT,
+                      start_url=args.url, final_url=args.url)
 
 
 def parse_args():
