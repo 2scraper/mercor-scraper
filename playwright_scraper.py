@@ -1554,14 +1554,7 @@ def scrape(args) -> int:
                            "each.")
             concurrency = 1
         elif not pool:
-            logger.warning("--concurrency %d with no proxy pool: every worker "
-                           "leaves from the SAME address, which is a faster way "
-                           "to get that address scored than to gather data. "
-                           "Mercor served every request measured on "
-                           "Cloudflare on EVERY route including robots.txt, "
-                           "so an address that works is one worth not "
-                           "burning. Pass --proxy-file to spread the load.",
-                           concurrency)
+            logger.warning(page_flow.CONCURRENCY_NO_POOL_WARNING, concurrency)
         if pool and pool.rotates_per_page():
             logger.info("--proxy-rotate per-page is redundant under "
                         "--concurrency: each worker already holds its own exit "
@@ -1922,10 +1915,7 @@ def parse_args():
     p.add_argument("--format", choices=["json", "csv", "both"], default="both")
     p.add_argument("--out", default="mercor_jobs", help="Output file prefix")
     p.add_argument("--locale", default="en-US",
-                   help="Browser locale (default en-US). It does NOT decide "
-                        "which route is read — that is --mode, or --url — so "
-                        "this only affects what the browser claims about "
-                        "itself.")
+                   help=page_flow.LOCALE_HELP)
     p.add_argument("--proxy", default=None,
                    help="Proxy URL, e.g. http://ACCOUNT:PASSWORD@HOST:9999 "
                         "(2captcha.com/proxy)")
@@ -1981,15 +1971,7 @@ def parse_args():
                         "captcha and reCAPTCHA.")
     p.add_argument("--solve-captcha", choices=["when-blocked", "always"],
                    default="when-blocked",
-                   help="when-blocked (default): only pay to solve a "
-                        "reCAPTCHA if the content is not already readable. "
-                        "always: solve whenever one is detected. Neither "
-                        "setting changes what Cloudflare does: a managed "
-                        "challenge is what a scored address gets on every "
-                        "route here, and a solve only helps once "
-                        "TURNSTILE_INTERCEPT_JS has captured its parameters. "
-                        "A residential exit removes the challenge entirely, "
-                        "which is why most runs never reach this path.")
+                   help=page_flow.SOLVE_CAPTCHA_HELP)
     p.add_argument("--min-score", type=float, default=0.7,
                    help="reCAPTCHA v3 minimum score to request (0.3, 0.7 or 0.9 "
                         "— the API only accepts these three). Ignored for v2 "
@@ -2020,6 +2002,9 @@ def parse_args():
     bad_number = page_flow.numeric_flag_error(args)
     if bad_number:
         p.error(bad_number)
+
+    if args.retries < 1:
+        p.error(page_flow.RETRIES_MUST_BE_POSITIVE)
 
     # Every mode has a correct default URL, so unlike the sibling repo this
     # engine was ported from there is nothing to refuse here and no pair of

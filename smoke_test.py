@@ -2025,6 +2025,113 @@ def check_every_engine_asks_the_shared_policy_before_ending_a_queue():
               "the pre-fix shape is present")
 
 
+# Words that belong to the sites this repo was copied from. A COMMENT may
+# cite them (provenance is honest and several do); a string a USER reads may
+# not — the audit found `find_country` and "a scored address gets on every
+# route here" in this repo's own --help, both inherited and both false.
+# Assembled from pieces so this file can be scanned too (§22).
+_OTHER_SITES_WORDS = re.compile(
+    r"find_" + r"country|scored " + r"address|well" + r"found|angel" + r"list|"
+    r"better " + r"business|\bB" + r"BB\b|rak" + r"uten|tokop" + r"edia|"
+    r"far" + r"fetch", re.I)
+
+
+def check_no_user_visible_string_carries_another_sites_words():
+    """§16/§17: copied text is the part with no evidence behind it.
+
+    "Cleaning up the template" had already happened once (a commit titled
+    for exactly that), and the audit still found three leftovers, because
+    the cleanup was done by search and replace over FILES rather than by
+    asking what a USER reads.
+
+    The first version of this walked only CALLS that produce text (help,
+    logger.*, error, print) — and a control planted the donor word into a
+    shared constant in `page_flow` and stayed GREEN: moving the text out of
+    the call into a named constant had hidden it from the check written to
+    watch it. So this reads EVERY string constant that is not a docstring,
+    in every module. Measured when it was widened: 2,130 constants, 0 hits
+    on the cleaned tree, so there is no exemption list to rot.
+    Docstrings and comments stay exempt on purpose: they cite precedent.
+    """
+    scanned, offenders = 0, []
+    for filename in sorted(os.listdir(HERE)):
+        if not filename.endswith(".py") or filename == "smoke_test.py":
+            continue
+        tree = ast.parse(open(os.path.join(HERE, filename),
+                              encoding="utf-8").read())
+        docstrings = set()
+        for node in ast.walk(tree):
+            if (isinstance(node, (ast.Module, ast.FunctionDef, ast.ClassDef,
+                                  ast.AsyncFunctionDef)) and node.body
+                    and isinstance(node.body[0], ast.Expr)
+                    and isinstance(getattr(node.body[0], "value", None),
+                                   ast.Constant)
+                    and isinstance(node.body[0].value.value, str)):
+                docstrings.add(id(node.body[0].value))
+        for node in ast.walk(tree):
+            if (isinstance(node, ast.Constant) and isinstance(node.value, str)
+                    and id(node) not in docstrings):
+                scanned += 1
+                m = _OTHER_SITES_WORDS.search(node.value)
+                if m:
+                    offenders.append("%s:%d %r in %r" % (
+                        filename, node.lineno, m.group(0), node.value[:100]))
+    # ONE check carrying the offenders, not one per string: a count inflated
+    # by thousands of trivially-passing assertions says nothing, and hides
+    # the day one of them matters.
+    check("no user-visible string carries another site's words",
+          not offenders, "; ".join(offenders))
+    check("the scan looked at string constants at all", scanned > 500,
+          "scanned %d" % scanned)
+
+    # And the texts three engines must agree on are defined ONCE. The
+    # drift this guards against was real: three engines, three different
+    # claims about --solve-captcha, two inherited and one flatly wrong.
+    for module in ENGINES:
+        path = os.path.join(HERE, module + ".py")
+        if not os.path.exists(path):
+            continue
+        src = open(path, encoding="utf-8").read()
+        check("%s takes --solve-captcha help from page_flow" % module,
+              "help=page_flow.SOLVE_CAPTCHA_HELP" in src.replace("\n", " ")
+              or "page_flow.SOLVE_CAPTCHA_HELP" in src)
+        check("%s takes --locale help from page_flow" % module,
+              "page_flow.LOCALE_HELP" in src)
+
+
+def check_retries_zero_is_refused_not_obeyed():
+    """The audit's `--retries 0`, and it was worse than reported.
+
+    `range(1, 0 + 1)` is empty, so the load loop never ran: no navigation,
+    the browser's empty document (39 bytes) was read, the run waited out its
+    full 45 s readiness timeout for a page it never requested, and exit 4
+    said "this listing is empty". Measured live before the fix.
+
+    It is a usage error, and exit 2 is the family's number for one.
+    """
+    for module in ENGINES:
+        engine = _import_engine(module)
+        if engine is None:
+            continue
+        saved_argv, saved_apply = list(sys.argv), engine.env_config.apply
+        engine.env_config.apply = lambda a: None
+        try:
+            for bad in ("0", "-1"):
+                sys.argv = [module + ".py", "--retries", bad]
+                try:
+                    engine.parse_args()
+                    code = "accepted"
+                except SystemExit as exc:
+                    code = exc.code
+                equal("%s refuses --retries %s with exit 2" % (module, bad),
+                      code, 2)
+            sys.argv = [module + ".py", "--retries", "1"]
+            check("%s still accepts --retries 1" % module,
+                  engine.parse_args().retries == 1)
+        finally:
+            sys.argv, engine.env_config.apply = saved_argv, saved_apply
+
+
 def check_concurrency_with_the_browser_stubbed():
     """A live run cannot always reach this machinery.
 

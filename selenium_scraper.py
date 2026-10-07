@@ -1297,9 +1297,7 @@ def parse_args():
     p.add_argument("--format", choices=["json", "csv", "both"], default="both")
     p.add_argument("--out", default="mercor_jobs", help="Output file prefix")
     p.add_argument("--locale", default="en-US",
-                   help="Browser locale (default en-US), passed to Chrome as "
-                        "--lang. It does NOT decide which route is "
-                        "read; that is --mode, or --url.")
+                   help=page_flow.LOCALE_HELP + " Passed to Chrome as --lang.")
     p.add_argument("--proxy", default=None,
                    help="Proxy URL. NOTE: Selenium cannot authenticate a "
                         "proxy; credentials are stripped and a warning says "
@@ -1337,13 +1335,7 @@ def parse_args():
     p.add_argument("--captcha-api", choices=["v2", "v1"], default="v2")
     p.add_argument("--solve-captcha", choices=["when-blocked", "always"],
                    default="when-blocked",
-                   help="when-blocked (default): only pay to solve a "
-                        "reCAPTCHA if the content is not already readable. "
-                        "always: solve whenever one is detected. Note that "
-                        "NO challenge has ever been observed on this site — a "
-                        "refused request gets no page at all — so neither "
-                        "setting has anything to act on today, and neither "
-                        "helps with a refusal.")
+                   help=page_flow.SOLVE_CAPTCHA_HELP)
     p.add_argument("--min-score", type=float, default=0.7)
     p.add_argument("--cdp-endpoint", default=None,
                    help="Attach to a running browser at host:port. Must NOT "
@@ -1363,6 +1355,9 @@ def parse_args():
     bad_number = page_flow.numeric_flag_error(args)
     if bad_number:
         p.error(bad_number)
+
+    if args.retries < 1:
+        p.error(page_flow.RETRIES_MUST_BE_POSITIVE)
 
     # Spelled identically to the other two engines.
     #

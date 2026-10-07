@@ -380,3 +380,43 @@ def concurrency_for_mode(mode: str, concurrency: int) -> int:
     if mode in ("listings", "careers"):
         return 1
     return max(1, int(concurrency or 1))
+
+
+# ---------------------------------------------------------------------------
+# User-facing text that three engines must say identically
+# ---------------------------------------------------------------------------
+# These were three hand-copied strings that had drifted into three different
+# claims about the same flag, two of them inherited from other sites. One
+# definition here makes that impossible, and `smoke_test.py` fails if an
+# engine spells a flag's help any other way.
+#
+# Every sentence is about Mercor and was measured on 2026-09-18; none is
+# carried from the repo this one was copied from.
+
+SOLVE_CAPTCHA_HELP = (
+    "when-blocked (default): only pay to solve a captcha if the content is "
+    "not already readable. always: solve whenever one is detected. On this "
+    "site that difference is real money: work.mercor.com loads an invisible "
+    "reCAPTCHA Enterprise on every page and it has never blocked a fetch, so "
+    "`always` buys a solve on every marketplace page to clear nothing. "
+    "www.mercor.com (--mode careers) loads none. No challenge was served on "
+    "any route on 2026-09-18; the solver exists for the day that changes.")
+
+LOCALE_HELP = (
+    "Browser locale (default en-US). It changes what the browser claims "
+    "about itself and nothing about which listings are read: no route this "
+    "scraper reads carries a locale segment or a per-country host.")
+
+CONCURRENCY_NO_POOL_WARNING = (
+    "--concurrency %d with no proxy pool: every worker leaves from the SAME "
+    "address, which is N times the traffic from one place. Mercor served "
+    "every request measured on 2026-09-18 from a bare datacentre address, so "
+    "this is a courtesy to the site rather than a known risk to you. Pass "
+    "--proxy-file to spread the load.")
+
+RETRIES_MUST_BE_POSITIVE = (
+    "--retries counts ATTEMPTS per page load, not repeats after the first, "
+    "so it must be at least 1. With 0 the load loop never runs: nothing is "
+    "fetched, the empty document the browser starts with is read, and the "
+    "run then waits out its full readiness timeout and reports exit 4 — "
+    "'this listing is empty' — for a page it never requested.")
