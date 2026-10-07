@@ -1140,12 +1140,20 @@ def scrape(args) -> int:
                                   if p.sku is None or p.sku not in seen_keys)
                 seen_keys.update(p.sku for p in outcome.products
                                  if p.sku is not None)
-                if not fresh_count:
+                if (not fresh_count
+                        and page_flow.a_page_without_rows_ends_the_run(args.mode)):
                     logger.info("Page %d added no rows not already seen — "
                                 "treating that as the end of the listing.",
                                 page_num)
                     stop_reason = "no_new_products"
                     break
+                if not fresh_count:
+                    # --mode job: every page is an independent address, so
+                    # one adding nothing (a withdrawn listing, a duplicate)
+                    # says nothing about the next.
+                    logger.info("Page %d (%s) added no rows (%s) — continuing "
+                                "with the rest of the queue.", page_num,
+                                outcome.url, outcome.state or "empty")
 
                 if index + 1 < len(planned):
                     time.sleep(args.delay)
@@ -1210,6 +1218,16 @@ def scrape(args) -> int:
     elif args.mode == "job":
         extra["jobs_enumerated"] = total_enumerated or None
         extra["jobs_fetched"] = len(ok_pages)
+        # Addresses the site answered "gone" for. A withdrawn listing is an
+        # ordinary event here (the enumeration is built before any address
+        # is fetched), so it does not make the run partial — but it is
+        # recorded BY ADDRESS, because "complete" with fewer rows than
+        # `jobs_fetched` would otherwise read as rows lost without a trace.
+        gone = [o.url for o in sorted(outcomes, key=lambda o: o.page_num)
+                if o.ok and o.state == "not_found"]
+        extra["jobs_not_found"] = len(gone)
+        if gone:
+            extra["urls_not_found"] = gone
     if args.domain:
         extra["domain_filter"] = args.domain
 

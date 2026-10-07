@@ -311,6 +311,30 @@ def pagination_is_addressable(url: str) -> bool:
     return route_of(url or "") == "job"
 
 
+def a_page_without_rows_ends_the_run(mode: str) -> bool:
+    """Whether a served page that adds no new rows means "there is no more".
+
+    CLAUDE.md §7 layer 3 — "this page added no new sku" is the terminating
+    condition for a LISTING, where pages are slices of ONE result and a page
+    that adds nothing means the slices have run out (or are looping back).
+
+    It is the WRONG condition for an enumerated queue, and `--mode job` is
+    one: every page is an independent address read from the sitemap, so one
+    page adding nothing says nothing about the next. Mercor makes that
+    routine rather than hypothetical, because the enumeration is built
+    before any of its addresses is fetched, so a listing withdrawn in
+    between is an ordinary event. Reproduced on the audited commit with
+    three queued addresses, the second a 404: ONE row, `status: complete`,
+    exit 0, `stop_reason: no_new_products`, the third address never fetched.
+
+    A 404 is the end of ONE URL, not of the list. This returns False for
+    `job`, and True for the modes that read slices of one result — which on
+    this site never reach a second page, so in practice it is a statement
+    of intent that keeps the next paginated mode from inheriting the bug.
+    """
+    return mode != "job"
+
+
 def pages_to_plan(pages_requested: int, pages_available: Optional[int]) -> int:
     """How many pages a run may ask for, given what the enumeration holds.
 

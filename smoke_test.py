@@ -1887,6 +1887,144 @@ def check_banned_wording():
     check("banned-wording scan ran", True)
 
 
+def _drive_scrape_over_a_job_queue(engine, urls, gone, concurrency):
+    """Run the REAL `scrape()` over an enumerated queue with the browser stubbed.
+
+    `gone` names the addresses the site answers 404 for. Everything else is
+    the real engine: planning, the sequential loop or the worker pool, the
+    merge, `finish_run` and the sidecar on disk.
+    """
+    import types
+    out = os.path.join(tempfile.mkdtemp(), "o")
+    saved_argv = list(sys.argv)
+    saved_apply = engine.env_config.apply
+    # `.env` must not decide this run: a MERCOR_URL there would name a route
+    # that disagrees with --mode job and abort argument parsing.
+    engine.env_config.apply = lambda a: None
+    sys.argv = ["playwright_scraper.py", "--mode", "job", "--pages",
+                str(len(urls)), "--delay", "0", "--retries", "1",
+                "--concurrency", str(concurrency), "--format", "json",
+                "--out", out]
+    try:
+        args = engine.parse_args()
+    finally:
+        sys.argv = saved_argv
+        engine.env_config.apply = saved_apply
+
+    from output_writer import JobPosting
+
+    def fake_fetch(session, a, pool, page_num, url):
+        oc = engine.PageOutcome(page_num=page_num, url=url, final_url=url)
+        if url in gone:
+            oc.state, oc.products = "not_found", []
+        else:
+            sku = url.rsplit("/", 2)[-2]
+            oc.state = "content"
+            oc.products = [JobPosting(source="mercor.com", scraped_at="t",
+                                      url=url, sku=sku, title=sku,
+                                      data_source="detail")]
+        return oc
+
+    class FakeSession:
+        def __init__(self, *a, **k):
+            self.pool = None
+            self.page = types.SimpleNamespace(url="x")
+        def open(self):
+            return self
+        def close(self):
+            pass
+
+    class FakePlaywright:
+        def __enter__(self):
+            return None
+        def __exit__(self, *a):
+            return False
+
+    real = (engine._fetch_one_page, engine._BrowserSession,
+            engine.sync_playwright, engine._enumerate_jobs)
+    engine._fetch_one_page = fake_fetch
+    engine._BrowserSession = FakeSession
+    engine.sync_playwright = lambda: FakePlaywright()
+    engine._enumerate_jobs = lambda session, a: list(urls)
+    try:
+        code = engine.scrape(args)
+    finally:
+        (engine._fetch_one_page, engine._BrowserSession,
+         engine.sync_playwright, engine._enumerate_jobs) = real
+    rows = json.load(open(out + ".json", encoding="utf-8"))
+    meta = json.load(open(out + ".meta.json", encoding="utf-8"))
+    return code, rows, meta
+
+
+def check_a_withdrawn_listing_does_not_end_the_job_queue():
+    """The audit's P1, reproduced on the audited commit and now pinned.
+
+    Three enumerated addresses, the SECOND answering 404. Before the fix:
+    ONE row, `status: complete`, exit 0, `stop_reason: no_new_products`, and
+    the third address never fetched — because "this page added no new sku"
+    is §7's end-of-listing signal, which is right for slices of one result
+    and wrong for a queue of independent addresses.
+
+    Both paths are driven, because the concurrent worker had its OWN copy of
+    the same condition (`outcome.ok and not outcome.products`) and a fix to
+    the sequential loop alone leaves it.
+
+    "good, 404, good" is the sequence §10 asks for and nothing here ran.
+    """
+    engine = _import_engine("playwright_scraper")
+    if engine is None:
+        return
+    U = ["https://work.mercor.com/jobs/list_AAA/a",
+         "https://work.mercor.com/jobs/list_DEAD/gone",
+         "https://work.mercor.com/jobs/list_CCC/c"]
+    for concurrency in (1, 2):
+        tag = "concurrency %d" % concurrency
+        code, rows, meta = _drive_scrape_over_a_job_queue(
+            engine, U, {U[1]}, concurrency)
+        equal("%s: the address AFTER the 404 is fetched" % tag,
+              sorted(r["sku"] for r in rows), ["list_AAA", "list_CCC"])
+        equal("%s: exit 0" % tag, code, 0)
+        equal("%s: the run is complete" % tag, meta["status"], "complete")
+        check("%s: and did NOT stop on 'no_new_products'" % tag,
+              meta["stop_reason"] != "no_new_products", meta["stop_reason"])
+        equal("%s: the gone address is recorded BY ADDRESS" % tag,
+              meta.get("urls_not_found"), [U[1]])
+        equal("%s: ...and counted" % tag, meta.get("jobs_not_found"), 1)
+
+    # The decision itself, for the modes whose pages ARE slices of one result.
+    import page_flow
+    check("a listing still ends on a page that adds nothing",
+          page_flow.a_page_without_rows_ends_the_run("listings"))
+    check("...and a job queue does not",
+          not page_flow.a_page_without_rows_ends_the_run("job"))
+
+
+def check_every_engine_asks_the_shared_policy_before_ending_a_queue():
+    """Three copies of one condition, and the fix must reach all of them.
+
+    The Playwright engine has TWO (sequential and worker), the mirrors one
+    each. Pinned by source because the mirrors cannot be driven offline
+    without their libraries — and a fix that reaches two engines of three is
+    the drift `page_flow` exists to prevent.
+    """
+    for module in ENGINES:
+        path = os.path.join(HERE, module + ".py")
+        if not os.path.exists(path):
+            continue
+        src = open(path, encoding="utf-8").read()
+        want = 2 if module == "playwright_scraper" else 1
+        got = src.count("a_page_without_rows_ends_the_run(")
+        check("%s consults the policy at each place it would end a run "
+              "(%d)" % (module, want), got == want,
+              "found %d; an unconditional `if not fresh_count: break` is back"
+              % got)
+        # The unconditional form must be gone.
+        check("%s has no unconditional end-on-no-new-rows" % module,
+              not re.search(r"if not fresh_count:\s*\n\s*logger\.info\("
+                            r"\"Page %d added no rows not already seen", src),
+              "the pre-fix shape is present")
+
+
 def check_concurrency_with_the_browser_stubbed():
     """A live run cannot always reach this machinery.
 
@@ -1903,7 +2041,10 @@ def check_concurrency_with_the_browser_stubbed():
         retries = 1
         retry_delay = 0
         out = "unused"
-        mode = "search"
+        # A mode this repo really has. This said "search" — BBB's, from the
+        # donor — which is not a mode here, so the check was exercising a
+        # branch keyed on something that cannot occur.
+        mode = "listings"
         sort = "a-z"
         pages = 50
 
