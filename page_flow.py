@@ -487,3 +487,37 @@ RETRIES_MUST_BE_POSITIVE = (
     "fetched, the empty document the browser starts with is read, and the "
     "run then waits out its full readiness timeout and reports exit 4 — "
     "'this listing is empty' — for a page it never requested.")
+
+# NO LIVE COUNT in any of the three below, on purpose (CLAUDE.md §13: a number
+# describing a living thing is paired with the command that produces it, or
+# left out). They used to say "390 contract roles", "462 jobs" and "the 72
+# listings the index does not show" — figures from 2026-09-18 that read as
+# current, and by 2026-10-07 were 305, 306 and 1. The run itself measures
+# them (sidecar: `records_in_payload`, `enumeration_sources`), and
+# `smoke_test.py` fails on a count creeping back into a user-visible string.
+
+MODE_HELP = (
+    "listings (default): work.mercor.com/explore, the marketplace index, the "
+    "whole of it in ONE response, with rates, domains, eligibility and slot "
+    "counts; --pages does not apply, the route has no second page. job: one "
+    "listing per page, enumerated from the sitemap AND the index, adding the "
+    "company website, the company description, the spot counts and a "
+    "currency; the only mode that reads listings the index does not show. "
+    "--pages says how many (capped at what the enumeration holds) and "
+    "--concurrency fetches them in parallel (Playwright only). careers: "
+    "www.mercor.com/careers, Mercor's OWN salaried openings via Ashby — a "
+    "different population with its own id space, so diff_runs.py will not "
+    "compare it against the other two.")
+
+LISTINGS_NOT_EXHAUSTIVE_NOTE = (
+    "--mode listings fetches everything /explore serves, and /explore is not "
+    "guaranteed to be everything Mercor publishes. How much it omits changes "
+    "from day to day — large on 2026-09-18, almost nothing on 2026-10-07 — so "
+    "--mode job, which reads the sitemap as well and records the size of the "
+    "union in the sidecar (enumeration_sources), is how to find out.")
+
+PAGES_IGNORED_WARNING = (
+    "--pages %d is ignored in --mode %s: the route holds its whole result "
+    "set in ONE response and honours no pagination parameter. --mode job is "
+    "the mode that pages — there a page is one job, and --pages is capped at "
+    "what the enumeration holds. The run status will say single_page_route.")

@@ -1743,11 +1743,7 @@ def scrape(args) -> int:
                         "structured data — which is why this scraper reads "
                         "the React Query payload instead.",
                         len(all_rows), indexed)
-        logger.info("--mode listings fetches everything /explore serves, and "
-                    "/explore is not everything Mercor publishes: 72 of the "
-                    "462 listings enumerated on 2026-09-18 appeared only in "
-                    "the sitemap, and all three of those checked were live. "
-                    "Use --mode job to cover them.")
+        logger.info(page_flow.LISTINGS_NOT_EXHAUSTIVE_NOTE)
 
     if args.mode == "job" and total_enumerated:
         done = len([o for o in outcomes if o.ok])
@@ -1832,29 +1828,15 @@ def parse_args():
                         "insensitively. This filters rows AFTER they are "
                         "fetched and is honest about it: Mercor's index "
                         "accepts no query parameters at all — ?domain= on "
-                        "/explore was measured returning the identical 390 "
-                        "records — so nothing here reduces what is "
+                        "/explore was measured returning a byte-identical "
+                        "payload (2026-09-18) — so nothing here reduces what is "
                         "downloaded. The 12 values Mercor publishes include "
                         "Finance, Software Engineering, Medicine, Law and "
                         "'Life, Physical, and Social Science'. --mode "
                         "listings and --mode job only; the careers route "
                         "publishes departments instead.")
     p.add_argument("--mode", choices=list(MODES), default=DEFAULT_MODE,
-                   help="listings (default): work.mercor.com/explore, the "
-                        "marketplace index. 390 contract roles in ONE "
-                        "response, with rates, domains, eligibility and slot "
-                        "counts; --pages does not apply, the route has no "
-                        "second page. job: one listing per page, enumerated "
-                        "from the sitemap and the index (462 jobs measured "
-                        "2026-09-18). Adds the company website, the company "
-                        "description, the spot counts and a currency, and is "
-                        "the only mode that covers the 72 listings the index "
-                        "does not show — use --pages to say how many, and "
-                        "--concurrency to fetch them in parallel. careers: "
-                        "www.mercor.com/careers, Mercor's OWN salaried "
-                        "openings via Ashby. A different population with its "
-                        "own id space, so diff_runs.py will not compare it "
-                        "against the other two.")
+                   help=page_flow.MODE_HELP)
     p.add_argument("--category", default=None,
                    help="Label to tag the run with in the sidecar. Defaults "
                         "to what the URL selects — 'explore', 'careers', or "
@@ -2022,12 +2004,7 @@ def parse_args():
         # assumed — `?page=2`, `?limit=`, `?offset=` and `?domain=` on
         # /explore each returned a byte-identical payload of the same 390
         # records on 2026-09-18, so there is genuinely nothing to fetch.
-        logger.warning("--pages %d is ignored in --mode %s: the route holds "
-                       "its whole result set in ONE response and honours no "
-                       "pagination parameter. --mode job is the mode that "
-                       "pages — there a page is one job, and --pages 462 "
-                       "fetches every one Mercor publishes. The run status "
-                       "will say single_page_route.", args.pages, args.mode)
+        logger.warning(page_flow.PAGES_IGNORED_WARNING, args.pages, args.mode)
         args.pages = 1
 
     if args.category is None:

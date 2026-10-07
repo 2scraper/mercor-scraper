@@ -1238,10 +1238,7 @@ def scrape(args) -> int:
     pages_available = next((o.pages_available for o in outcomes
                             if o.pages_available is not None), None)
     if args.mode == "listings" and all_rows:
-        logger.info("--mode listings fetches everything /explore serves, and "
-                    "/explore is not everything Mercor publishes: 72 of the "
-                    "462 listings enumerated on 2026-09-18 appeared only in "
-                    "the sitemap. Use --mode job to cover them.")
+        logger.info(page_flow.LISTINGS_NOT_EXHAUSTIVE_NOTE)
 
     ok_pages, failed_pages, unreadable_pages = page_flow.account_for_pages(
         outcomes)
@@ -1316,15 +1313,7 @@ def parse_args():
                         "query parameters, so nothing here reduces what is "
                         "downloaded. --mode listings and --mode job only.")
     p.add_argument("--mode", choices=list(MODES), default=DEFAULT_MODE,
-                   help="listings (default): work.mercor.com/explore, the "
-                        "marketplace index — 390 contract roles in ONE "
-                        "response; --pages does not apply. job: one listing "
-                        "per page, enumerated from the sitemap and the index "
-                        "(462 jobs measured 2026-09-18); the only mode that "
-                        "covers the listings the index does not show. "
-                        "careers: www.mercor.com/careers, Mercor's OWN "
-                        "salaried openings via Ashby — a different "
-                        "population with its own id space.")
+                   help=page_flow.MODE_HELP)
     p.add_argument("--category", default=None,
                    help="Label to tag the run with in the sidecar. Defaults "
                         "to what the run selects. Mercor's routes carry no "
@@ -1455,11 +1444,7 @@ def parse_args():
         # Said out loud rather than silently ignored. Measured, not assumed:
         # every pagination parameter tried on /explore returned a
         # byte-identical payload on 2026-09-18.
-        logger.warning("--pages %d is ignored in --mode %s: the route holds "
-                       "its whole result set in ONE response and honours no "
-                       "pagination parameter. --mode job is the mode that "
-                       "pages — there a page is one job.",
-                       args.pages, args.mode)
+        logger.warning(page_flow.PAGES_IGNORED_WARNING, args.pages, args.mode)
         args.pages = 1
 
     if args.category is None:

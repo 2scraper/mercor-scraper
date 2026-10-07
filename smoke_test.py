@@ -2709,6 +2709,62 @@ def check_no_user_visible_string_carries_another_sites_words():
               "page_flow.LOCALE_HELP" in src)
 
 
+def check_no_live_count_is_stated_as_current_in_a_user_visible_string():
+    """§13 rule 3: a number describing a living thing is paired with the
+    command that produces it, or left out.
+
+    Three user-visible strings said "390 contract roles", "462 jobs" and "the
+    72 listings the index does not show". Each was true on 2026-09-18 and
+    read as current; by 2026-10-07 the figures were 305, 306 and 1. The
+    point is not those numbers: it is that the SIZE OF THE GAP is the thing
+    that moves, and a message printed on every run is exactly where a stale
+    one does the most damage.
+
+    Dated figures are still welcome in docstrings and comments, where they
+    are records of a measurement. In anything a user reads at run time the
+    run itself measures them (sidecar: `records_in_payload`,
+    `enumeration_sources`).
+    """
+    count_phrase = re.compile(
+        r"\b\d{2,}\s+(?:contract\s+|live\s+|detail\s+)?"
+        r"(?:listings?|jobs?|roles?|URLs?|records?|adverts?|openings?)\b", re.I)
+    offenders, scanned = [], 0
+    for filename in sorted(os.listdir(HERE)):
+        if not filename.endswith(".py") or filename == "smoke_test.py":
+            continue
+        tree = ast.parse(open(os.path.join(HERE, filename),
+                              encoding="utf-8").read())
+        docstrings = set()
+        for node in ast.walk(tree):
+            if (isinstance(node, (ast.Module, ast.FunctionDef, ast.ClassDef,
+                                  ast.AsyncFunctionDef)) and node.body
+                    and isinstance(node.body[0], ast.Expr)
+                    and isinstance(getattr(node.body[0], "value", None),
+                                   ast.Constant)
+                    and isinstance(node.body[0].value.value, str)):
+                docstrings.add(id(node.body[0].value))
+        for node in ast.walk(tree):
+            if (isinstance(node, ast.Constant) and isinstance(node.value, str)
+                    and id(node) not in docstrings):
+                scanned += 1
+                m = count_phrase.search(node.value)
+                if m:
+                    offenders.append("%s:%d %r" % (filename, node.lineno,
+                                                   m.group(0)))
+    check("no user-visible string states a live count as current",
+          not offenders, "; ".join(offenders))
+    check("the scan looked at string constants at all", scanned > 500,
+          "scanned %d" % scanned)
+    # The shared texts exist and carry no digit run at all.
+    import page_flow
+    for name in ("MODE_HELP", "LISTINGS_NOT_EXHAUSTIVE_NOTE",
+                 "PAGES_IGNORED_WARNING"):
+        text = getattr(page_flow, name)
+        check("page_flow.%s states no count" % name,
+              not re.search(r"\b\d{3,}\b", text.replace("2026-09-18", "")
+                            .replace("2026-10-07", "")), text[:80])
+
+
 def check_retries_zero_is_refused_not_obeyed():
     """The audit's `--retries 0`, and it was worse than reported.
 

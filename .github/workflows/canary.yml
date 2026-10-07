@@ -117,6 +117,13 @@ jobs:
           want("no failed pages", not meta["pages_failed"], str(meta["pages_failed"]))
           want("the route is still single-page",
                meta["stop_reason"] == "single_page_route", meta["stop_reason"])
+          # A page the site served and the parser could not read used to end
+          # as `empty` (exit 4) — "the index is empty" — and now ends as
+          # `parser_found_nothing`. Either way the run would not be
+          # `complete`; this names it, so the failure says what moved.
+          want("no page was served and left unread",
+               not meta.get("pages_unreadable"),
+               str(meta.get("pages_unreadable")))
 
           # 390 listings on 2026-09-18. The floor sits well under that on
           # purpose: a marketplace's size moves, and a threshold that fires
@@ -190,6 +197,9 @@ jobs:
 
           crows = json.load(open("canary_careers.json"))
           cmeta = json.load(open("canary_careers.meta.json"))
+          want("careers: no page was served and left unread",
+               not cmeta.get("pages_unreadable"),
+               str(cmeta.get("pages_unreadable")))
           print(f"careers: {len(crows)} role(s), status {cmeta['status']}")
           want("careers status", cmeta["status"] == "complete", cmeta["status"])
           want("careers row floor", len(crows) >= 20, f"{len(crows)} rows")
@@ -350,6 +360,22 @@ jobs:
           want("the enumeration still finds a catalogue",
                isinstance(enumerated, int) and enumerated >= 100,
                f"jobs_enumerated was {enumerated}")
+          # BOTH sources answered. This is the daily check that makes a lost
+          # sitemap loud: without it a run could enumerate from the index
+          # alone, fetch every address it was given, and be green. Since
+          # v0.1.1 such a run is `partial`, which the status check above
+          # already fails on — this names WHICH source and why.
+          want("the enumeration was whole (sitemap AND index answered)",
+               meta.get("enumeration_complete") is True,
+               str(meta.get("enumeration_failures")))
+          sources = meta.get("enumeration_sources") or {}
+          print(f"enumeration sources: {sources}")
+          want("both sources contributed",
+               sources.get("sitemap_urls", 0) > 0
+               and sources.get("explore_records", 0) > 0, str(sources))
+          want("no page was served and left unread",
+               not meta.get("pages_unreadable"),
+               str(meta.get("pages_unreadable")))
 
           want("four rows", len(rows) == 4, f"{len(rows)} rows")
           want("sku unique", len({r["sku"] for r in rows}) == 4, "duplicate skus")
