@@ -3587,6 +3587,278 @@ def check_a_target_404_is_exit_4_in_the_scraper_api_client_as_in_the_browser():
             equal("the API client and Playwright agree on %s" % key,
                   meta.get(key), pw_meta.get(key))
 
+
+def _drive_engine_over_routes(engine_name, argv, route, job_queue=None):
+    """The REAL `scrape()` and `_fetch_one_page` of one engine, with only the
+    browser primitives stubbed: `route(url)` answers (status, html) for every
+    navigation. `job_queue` stubs the enumeration for `--mode job`.
+
+    Returns (exit code, sidecar or None, navigations per url, out prefix),
+    or None when the engine's driver library is absent.
+    """
+    import types
+    engine = _import_engine(engine_name)
+    if engine is None:
+        return None
+    import page_flow
+    import product_parser as _pp
+    out = argv_out = None
+    for i, a in enumerate(argv):
+        if a == "--out":
+            argv_out = argv[i + 1]
+    out = argv_out or os.path.join(tempfile.mkdtemp(), "o")
+    navs = {}
+
+    def nav(url):
+        navs[url] = navs.get(url, 0) + 1
+        return route(url)
+
+    class _PWPage:
+        def __init__(self):
+            self.url, self._html = "about:blank", ""
+        def goto(self, url, **k):
+            status, self._html = nav(url)
+            self.url = url
+            return types.SimpleNamespace(status=status)
+        def content(self):
+            return self._html
+        def evaluate(self, *a, **k):
+            return {}
+        def query_selector_all(self, sel):
+            return []
+        def wait_for_timeout(self, ms):
+            pass
+        def screenshot(self, **k):
+            pass
+
+    class _SeDriver:
+        def __init__(self):
+            self.current_url, self.page_source, self.status = "about:blank", "", None
+        def get(self, url):
+            self.status, self.page_source = nav(url)
+            self.current_url = url
+        def get_log(self, kind):
+            return []
+        def find_elements(self, *a):
+            return []
+        def execute_script(self, *a):
+            return self.page_source
+        def save_screenshot(self, *a):
+            pass
+
+    class _PyPage:
+        def __init__(self):
+            self.url, self._html = "about:blank", ""
+        def goto(self, url, *a, **k):
+            status, self._html = nav(url)
+            self.url = url
+            return types.SimpleNamespace(status=status)
+        def content(self):
+            return self._html
+        def querySelectorAll(self, sel):
+            return []
+        def evaluate(self, *a, **k):
+            return {}
+        def screenshot(self, *a, **k):
+            pass
+
+    class _Session:
+        def __init__(self, *a, **k):
+            self.pool = None
+            self.page = _PWPage() if engine_name == "playwright_scraper" else _PyPage()
+            self.driver = _SeDriver()
+            self.bridge = types.SimpleNamespace(run=lambda x, *a, **k: x,
+                                                close=lambda: None)
+        def open(self):
+            return self
+        def close(self):
+            pass
+        def relaunch(self):
+            pass
+
+    class _PW:
+        def __enter__(self):
+            return None
+        def __exit__(self, *a):
+            return False
+
+    saved_argv = list(sys.argv)
+    names = ["_fetch_one_page", "_enumerate_jobs", "handle_captcha_if_present"]
+    names += {"playwright_scraper": ["_BrowserSession", "sync_playwright"],
+              "selenium_scraper": ["_Session", "_document_status"],
+              "puppeteer_scraper": ["_Session", "_AsyncBridge"]}[engine_name]
+    real = {n: getattr(engine, n) for n in names}
+    real_apply, real_wait = engine.env_config.apply, page_flow.content_timeout_ms
+    try:
+        sys.argv = [engine_name + ".py"] + list(argv) + (
+            [] if argv_out else ["--out", out]) + [
+            "--format", "json", "--delay", "0", "--retry-delay", "0"]
+        engine.env_config.apply = lambda a: None
+        args = engine.parse_args()
+        page_flow.content_timeout_ms = lambda mode: 0
+        engine.handle_captcha_if_present = lambda *a, **k: False
+        if job_queue is not None:
+            engine._enumerate_jobs = lambda *a, **k: _pp.EnumerationResult(
+                urls=list(job_queue), sitemap_urls=len(job_queue),
+                explore_records=len(job_queue), failures=[])
+        if engine_name == "playwright_scraper":
+            engine._BrowserSession = _Session
+            engine.sync_playwright = lambda: _PW()
+        elif engine_name == "selenium_scraper":
+            engine._Session = _Session
+            engine._document_status = lambda session, url: session.driver.status
+        else:
+            engine._Session = _Session
+            engine._AsyncBridge = lambda: types.SimpleNamespace(
+                run=lambda x, *a, **k: x, close=lambda: None)
+        with contextlib.redirect_stdout(io.StringIO()):
+            code = engine.scrape(args)
+    finally:
+        sys.argv = saved_argv
+        engine.env_config.apply, page_flow.content_timeout_ms = real_apply, real_wait
+        for n, v in real.items():
+            setattr(engine, n, v)
+    meta_path = out + ".meta.json"
+    meta = (json.load(open(meta_path, encoding="utf-8"))
+            if os.path.exists(meta_path) else None)
+    return code, meta, navs, out
+
+
+_GOOD_JOB = "https://work.mercor.com/jobs/list_AAABoKHds2e4X1lxEltFyJa7/forensic-toxicological-chemist"
+_UPSTREAM_ERROR_HTML = "<html><body>502 Bad Gateway</body></html>"
+
+
+def check_a_target_5xx_is_content_not_obtained_in_every_engine():
+    """A Mercor 5xx says nothing about what the page holds. It is retried
+    within the existing budget and then reported as content NOT obtained:
+    exit 5 on page 1, exit 6 after earlier rows, never exit 4, with the
+    status in the sidecar and earlier good output left alone. A 404 stays 4.
+    """
+    import page_flow
+    for name in ENGINES:
+        five = lambda url: (503, _UPSTREAM_ERROR_HTML)
+        got = _drive_engine_over_routes(
+            name, ["--mode", "job", "--url", _DEAD_JOB, "--retries", "1"], five)
+        if got is None:
+            continue
+        code, meta, navs, out = got
+        equal("%s: a target 503 on the only page is exit 5" % name, code, 5)
+        check("%s: ...retried within the budget, not once and not forever" % name,
+              1 < navs.get(_DEAD_JOB, 0) <= 1 + page_flow.BLOCK_RETRIES_WITHOUT_POOL,
+              "navigations: %r" % navs)
+
+        # Earlier good output survives the failed run, sidecar included.
+        d = tempfile.mkdtemp()
+        prior = os.path.join(d, "o")
+        open(prior + ".json", "w").write('[{"sku": "kept"}]')
+        open(prior + ".meta.json", "w").write('{"status": "complete"}')
+        code, _, _, _ = _drive_engine_over_routes(
+            name, ["--mode", "job", "--url", _DEAD_JOB, "--retries", "1",
+                   "--out", prior], five)
+        equal("%s: exit 5 with earlier output on disk" % name, code, 5)
+        check("%s: ...and the earlier rows and sidecar are untouched" % name,
+              open(prior + ".json").read() == '[{"sku": "kept"}]'
+              and open(prior + ".meta.json").read() == '{"status": "complete"}')
+
+        code, meta, _, _ = _drive_engine_over_routes(
+            name, ["--mode", "job", "--url", _DEAD_JOB, "--retries", "1",
+                   "--allow-empty"], five)
+        equal("%s: --allow-empty does not turn a 503 into exit 4" % name, code, 5)
+        meta = meta or {}
+        equal("%s: the sidecar says failed" % name, meta.get("status"), "failed")
+        equal("%s: ...why" % name, meta.get("stop_reason"),
+              page_flow.TARGET_SERVER_ERROR)
+        equal("%s: ...which page" % name, meta.get("pages_failed"), [1])
+        equal("%s: ...and the target's status" % name,
+              meta.get("pages_target_http_error"), {"1": 503})
+
+        # Rows first, then a 5xx: partial, exit 6.
+        queue = [_GOOD_JOB, _DEAD_JOB]
+        route = lambda url: (200, DETAIL_HTML) if url == _GOOD_JOB else (502, _UPSTREAM_ERROR_HTML)
+        code, meta, _, _ = _drive_engine_over_routes(
+            name, ["--mode", "job", "--pages", "2", "--retries", "1"], route,
+            job_queue=queue)
+        equal("%s: a 5xx after a good page is exit 6" % name, code, 6)
+        meta = meta or {}
+        equal("%s: ...partial" % name, meta.get("status"), "partial")
+        equal("%s: ...naming page 2 and its status" % name,
+              meta.get("pages_target_http_error"), {"2": 502})
+
+        # A transient 5xx that clears on the retry is a normal run.
+        seen = {"n": 0}
+        def flaky(url):
+            seen["n"] += 1
+            return (503, _UPSTREAM_ERROR_HTML) if seen["n"] == 1 else (200, DETAIL_HTML)
+        code, _, _, _ = _drive_engine_over_routes(
+            name, ["--mode", "job", "--url", _GOOD_JOB, "--retries", "1"], flaky)
+        equal("%s: a 503 that clears on the retry is exit 0" % name, code, 0)
+
+        # The 404 contract is unchanged.
+        code, _, _, _ = _drive_engine_over_routes(
+            name, ["--mode", "job", "--url", _DEAD_JOB, "--retries", "1"],
+            lambda url: (404, NOT_FOUND_HTML))
+        equal("%s: a target 404 is still exit 4" % name, code, 4)
+
+
+def check_a_target_5xx_is_content_not_obtained_in_the_scraper_api_client():
+    """The same rule through the Scraper API, where the target's status is
+    `http_code` of an HTTP 200 answer: retried within --retries, then exit 5
+    with the status in the sidecar. The API's own `status: "error"` with no
+    target status is also content not obtained."""
+    import page_flow
+    import scraper_api_client as sac
+    err = {"status": "error", "http_code": 503, "headers": {},
+           "body": _UPSTREAM_ERROR_HTML}
+
+    def run(bodies, extra=()):
+        out = os.path.join(tempfile.mkdtemp(), "o")
+        calls = []
+        class _R:
+            status_code = 200
+            headers = {}
+            text = ""
+            def __init__(self, body):
+                self.body = body
+            def json(self):
+                return self.body
+        queue = list(bodies)
+        def fake_post(url, **kw):
+            calls.append(1)
+            return _R(queue.pop(0) if len(queue) > 1 else queue[0])
+        saved = (sac.requests.post, sys.argv, sac.env_config.apply)
+        sac.requests.post = fake_post
+        sac.env_config.apply = lambda a, **k: None
+        sys.argv = ["scraper_api_client.py", "--key", "k" * 8, "--mode", "job",
+                    "--url", _DEAD_JOB, "--format", "json", "--out", out,
+                    "--retries", "1", "--retry-delay", "0"] + list(extra)
+        try:
+            with contextlib.redirect_stdout(io.StringIO()):
+                code = sac.main()
+        finally:
+            sac.requests.post, sys.argv, sac.env_config.apply = saved
+        meta = (json.load(open(out + ".meta.json", encoding="utf-8"))
+                if os.path.exists(out + ".meta.json") else None)
+        return code, meta, len(calls), os.path.exists(out + ".json")
+
+    code, meta, calls, wrote = run([err])
+    equal("scraper API: a target 503 is exit 5", code, 5)
+    equal("scraper API: ...after the --retries budget (2 attempts)", calls, 2)
+    check("scraper API: ...and writes nothing over earlier output",
+          not wrote and meta is None)
+    code, meta, _, _ = run([err], ["--allow-empty"])
+    equal("scraper API: --allow-empty keeps the 503 at exit 5", code, 5)
+    meta = meta or {}
+    equal("scraper API: the sidecar says failed", meta.get("status"), "failed")
+    equal("scraper API: ...why", meta.get("stop_reason"), page_flow.TARGET_SERVER_ERROR)
+    equal("scraper API: ...and the target's status",
+          meta.get("pages_target_http_error"), {"1": 503})
+    good = {"status": "success", "http_code": 200, "headers": {}, "body": DETAIL_HTML}
+    code, _, calls, _ = run([err, good])
+    equal("scraper API: a 503 that clears on the retry is exit 0", code, 0)
+    no_status = {"status": "error", "headers": {}, "body": ""}
+    code, _, _, _ = run([no_status])
+    equal("scraper API: status 'error' with no target status is exit 5", code, 5)
+
 def check_no_engine_branches_on_a_mode_that_does_not_exist():
     """No engine may branch on a mode this repo does not have.
 

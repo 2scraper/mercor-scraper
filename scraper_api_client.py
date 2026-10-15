@@ -70,6 +70,11 @@ MAX_API_TIMEOUT = 120
 # of one exit code is how a family's contract drifts.
 from output_writer import (EXIT_API_ERROR, SOURCE_DEFAULT,  # noqa: E402
                            finish_run)
+from page_flow import TARGET_SERVER_ERROR, target_server_error  # noqa: E402
+
+# `_run_once` asks `main` for another attempt after a target 5xx. Never
+# returned as an exit code: the last attempt reports the failure itself.
+_RETRY_TARGET_5XX = -5
 
 def _mask_credentials(url: str) -> str:
     """Never print a username:password embedded in a ws://... or http://... URL."""
@@ -187,6 +192,11 @@ def fetch_html(args) -> str:
     if not isinstance(upstream_status, int):
         legacy = body.get("status")
         upstream_status = legacy if isinstance(legacy, int) else None
+    if upstream_status is None and body.get("status") == "error":
+        # The API's documented verdict for a target network error or 5xx.
+        # With no target status to classify, nothing was obtained: exit 5.
+        raise RuntimeError("Scraper API task ended with status 'error' and "
+                           "no target status: the page was not obtained")
     logger.info("Upstream page HTTP %s (API status %r), %d bytes of HTML.",
                 upstream_status, body.get("status"), len(html))
     # The STATUS is returned alongside the HTML, not thrown away. It used to
@@ -212,9 +222,10 @@ def main() -> int:
     attempts = max(1, args.retries + 1)
     for attempt in range(1, attempts + 1):
         rc = _run_once(args, attempt, attempts)
-        if rc != 3 or attempt == attempts:
+        if rc not in (3, _RETRY_TARGET_5XX) or attempt == attempts:
             return rc
-        logger.info("Challenge page on attempt %d/%d — retrying in %ds.",
+        logger.info("%s on attempt %d/%d — retrying in %ds.",
+                    "Challenge page" if rc == 3 else "Target server error",
                     attempt, attempts, args.retry_delay)
         time.sleep(args.retry_delay)
     return rc
@@ -267,6 +278,26 @@ def _run_once(args, attempt: int = 1, attempts: int = 1) -> int:
 
     stop_reason = ("single_page_route" if args.mode in ("listings", "careers")
                    else "completed")
+    server_error = target_server_error(state, upstream_status)
+    if server_error is not None:
+        # Mercor's own 5xx, carried in `http_code` of an HTTP 200 API answer.
+        # It says nothing about what the page holds: retried within
+        # --retries, then the content was not obtained (exit 5), never the
+        # empty result of exit 4. No rows, so earlier output is kept.
+        if attempt < attempts:
+            return _RETRY_TARGET_5XX
+        logger.error("Mercor answered HTTP %d for %s on every attempt — "
+                     "exit %d: the page was not obtained, NOT an empty "
+                     "result (exit 4).", server_error, args.url, EXIT_API_ERROR)
+        return finish_run([], args.out, args.format, args.allow_empty,
+                          blocked=False, stop_reason=TARGET_SERVER_ERROR,
+                          pages_requested=1, pages_completed=0,
+                          pages_failed=[1], mode=args.mode,
+                          source=SOURCE_DEFAULT, start_url=args.url,
+                          final_url=args.url,
+                          extra={"route_is_paginated": args.mode == "job",
+                                 "mode": args.mode,
+                                 "pages_target_http_error": {"1": server_error}})
     if state == "not_found":
         # `upstream_status` is the TARGET's status: the Scraper API answers
         # HTTP 200 and carries a site 404 in `http_code` (its documentation

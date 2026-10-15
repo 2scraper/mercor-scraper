@@ -11,6 +11,17 @@ it from a bill or from a diff.
 
 ## [Unreleased]
 
+> **Behaviour change: a Mercor 5xx is no longer exit 4.** A page the site
+> answered with a server error used to be counted as served, and a run whose
+> only page was a 503 said "empty result" (exit 4). Now the page is retried
+> within the existing budget and then reported as content not obtained. That
+> is exit 5 on the first page and exit 6 after earlier rows, with stop reason
+> `target_http_5xx` and the status in `pages_target_http_error`. This applies
+> in Playwright, Selenium, pyppeteer and `scraper_api_client.py`, where the
+> status is the Scraper API's `http_code`. A Scraper API answer of
+> `status: "error"` with no target status is exit 5 too. A 404 is still
+> exit 4.
+
 ### Fixed
 - **`scraper_api_client.py` handles a Mercor 404 the way the browser engines
   do.** The exit code was already 4 and stays 4. A dead job answered through

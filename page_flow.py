@@ -365,6 +365,41 @@ def account_for_pages(outcomes):
     return read, failed, unreadable
 
 
+
+# The stop reason for a page the TARGET answered with a server error.
+TARGET_SERVER_ERROR = "target_http_5xx"
+
+
+def target_server_error(state: str, status) -> Optional[int]:
+    """The status, when a page ended as a target-site server error.
+
+    `detect_page_state` calls a 5xx with no records `unknown`, and `unknown`
+    is retried. When the retries are spent the page is still not the site's
+    answer. A 503 says nothing about whether the job or the index holds
+    anything, so it is content NOT obtained (exit 5, or 6 after earlier
+    rows), never the empty result exit 4 claims. A 404 is not here: that is
+    the site saying the address does not exist.
+    """
+    if state == "unknown" and isinstance(status, int) and status >= 500:
+        return status
+    return None
+
+
+def failure_stop_reason(outcome) -> str:
+    """Why a failed page ended the run, in the same words for every engine."""
+    if outcome.load_failed:
+        return "page_load_timeout"
+    if getattr(outcome, "server_error", None) is not None:
+        return TARGET_SERVER_ERROR
+    return f"blocked_{outcome.blocked_by}"
+
+
+def target_http_errors(outcomes) -> dict:
+    """{page number: target status} for every page that ended as a 5xx."""
+    return {str(o.page_num): o.server_error
+            for o in sorted(outcomes, key=lambda o: o.page_num)
+            if getattr(o, "server_error", None) is not None}
+
 def reconcile_stop_reason(stop_reason: str,
                           enumeration_complete: Optional[bool],
                           unreadable_pages=()) -> str:
