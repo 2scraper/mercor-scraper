@@ -220,6 +220,16 @@ and the page named in `pages_unreadable` — never `4`, which would tell you
 the site had nothing. `--retries` counts attempts, so `--retries 0` is a
 usage error (exit 2).
 
+**A 404 from Mercor is `4`, and it is `4` on every path.** A job address the
+site answers 404 for (stop reason `completed`, the address in
+`urls_not_found`) is a real answer from the site: the job is gone. The
+browser engines read that 404 from the navigation's status. Through
+`scraper_api_client.py` it arrives as the `http_code` of an HTTP 200 Scraper
+API response, because the API reports the target site's status there rather
+than as an API error. A non-200 from the Scraper API itself (its own 404
+means an unknown task id; 402, 408 and 422 are its other refusals) is `5`,
+because then nothing was obtained from Mercor at all.
+
 A run that finds nothing **writes nothing** — last night's good output is
 never replaced with `[]`. `--allow-empty` opts out.
 
