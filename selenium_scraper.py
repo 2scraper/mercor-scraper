@@ -157,6 +157,9 @@ class PageOutcome:
     products: List = field(default_factory=list)
     blocked_by: Optional[str] = None
     load_failed: bool = False
+    # The target's 5xx status when the page ended as a server error after
+    # its retries (see page_flow.target_server_error). Not ok: no content.
+    server_error: Optional[int] = None
     state: Optional[str] = None
     # What this response said about itself. Mercor publishes no catalogue
     # and how many pages the site will serve. Real numbers here, unlike the
@@ -177,7 +180,8 @@ class PageOutcome:
 
     @property
     def ok(self) -> bool:
-        return not self.load_failed and self.blocked_by is None
+        return (not self.load_failed and self.blocked_by is None
+                and self.server_error is None)
 
 
 # Every `scheme://user:pass@` in a string, however many times it occurs.
@@ -881,6 +885,13 @@ def _fetch_one_page(session, args, pool, page_num: int, url: str) -> PageOutcome
         return outcome
 
     outcome.state = state
+    outcome.server_error = page_flow.target_server_error(state, http_status)
+    if outcome.server_error is not None:
+        logger.error("Page %d: Mercor answered HTTP %d (a server error) on every "
+                     "attempt. Nothing was obtained from it, so this page is "
+                     "FAILED, not empty.", page_num, outcome.server_error)
+        outcome.final_url = d["current_url"]()
+        return outcome
 
     if state == "blocked":
         # Mercor has never refused this scraper — see
@@ -1088,8 +1099,7 @@ def scrape(args) -> int:
         outcomes.append(first)
 
         if not first.ok:
-            stop_reason = ("page_load_timeout" if first.load_failed
-                           else f"blocked_{first.blocked_by}")
+            stop_reason = page_flow.failure_stop_reason(first)
             blocked = first.blocked_by is not None
         elif args.mode == "job" and not job_urls:
             pass  # `--url` named one job; one page is the whole run
@@ -1114,8 +1124,7 @@ def scrape(args) -> int:
                 outcome = _fetch_one_page(session, args, pool, page_num, url)
                 outcomes.append(outcome)
                 if not outcome.ok:
-                    stop_reason = ("page_load_timeout" if outcome.load_failed
-                                   else f"blocked_{outcome.blocked_by}")
+                    stop_reason = page_flow.failure_stop_reason(outcome)
                     blocked = outcome.blocked_by is not None
                     break
 
@@ -1195,6 +1204,12 @@ def scrape(args) -> int:
         # Pages the site served and this parser could not read — by number,
         # so the loss is a list a reader can act on rather than a count.
         extra["pages_unreadable"] = unreadable_pages
+    http_errors = page_flow.target_http_errors(outcomes)
+    if http_errors:
+        # Pages the TARGET answered with a server error, and its status:
+        # failed pages, recorded with the status so a 503 is not mistaken
+        # for a dead proxy or an empty index.
+        extra["pages_target_http_error"] = http_errors
     if args.mode == "listings":
         extra["records_in_payload"] = total_available
         extra["urls_in_itemlist"] = indexed

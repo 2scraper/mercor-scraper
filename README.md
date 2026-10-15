@@ -230,6 +230,15 @@ than as an API error. A non-200 from the Scraper API itself (its own 404
 means an unknown task id; 402, 408 and 422 are its other refusals) is `5`,
 because then nothing was obtained from Mercor at all.
 
+**A 5xx from Mercor is `5` (or `6` after earlier rows), never `4`.** A server
+error says nothing about what the page holds. The page is fetched again
+within the existing retry budget. If every attempt is a 5xx, the page is
+failed (stop reason `target_http_5xx`), and the sidecar records the status
+per page in `pages_target_http_error`. That status is the navigation's own in
+the browser engines and `http_code` through the Scraper API. With no rows,
+nothing is written, so earlier good output and its sidecar stay as they were;
+`--allow-empty` writes a `failed` sidecar instead.
+
 A run that finds nothing **writes nothing** — last night's good output is
 never replaced with `[]`. `--allow-empty` opts out.
 
