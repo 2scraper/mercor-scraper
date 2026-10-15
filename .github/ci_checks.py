@@ -81,14 +81,22 @@ CREDENTIAL_ALLOWED = (
 HEX32 = re.compile(r"\b[0-9a-f]{32}\b")
 # Contexts in which a 32-hex string is plainly not a key. Site-specific
 # entries belong here only once a committed fixture actually carries one —
-# CLAUDE.md §16: a family-wide entry copied without checking is how dead
+# A family-wide entry copied without checking is how dead
 # code spreads. Kept as a CONTEXT allowlist rather than by loosening the
 # pattern: a bare 32-hex string anywhere else still fails, which is the
 # point of the check.
 HEX32_ALLOWED = ("sha", "hash", "nonce", "example", "md5", "digest",
                  "checksum")
 
-SCANNED_SUFFIXES = (".py", ".md", ".txt", ".yml", ".yaml", ".example")
+SCANNED_SUFFIXES = (".py", ".md", ".txt", ".yml", ".yaml", ".example",
+                    ".json", ".csv", ".toml", ".cfg", ".ini", ".sh")
+
+
+def _is_env_file(path):
+    """`.env`, `.env.bak`, `.env.local`, `.env.hold` ... by NAME, whatever the
+    suffix. A working copy renamed the way people rename them is exactly
+    where a live key sits untracked, so it is read rather than skipped."""
+    return path.name == ".env" or path.name.startswith(".env.")
 
 
 # Directories that are never this repo's own source. Named ones first, then
@@ -107,7 +115,7 @@ def _is_virtualenv(path):
     walked into pip's vendored code and flagged a 32-hex string in
     `_elffile.py` as key-shaped. The run was correct about the string and
     wrong about the file, and a guard people have to argue with is one they
-    learn to suppress (CLAUDE.md §22).
+    learn to suppress.
 
     Structural rather than by name, for the same reason a parser anchors on a
     URL pattern instead of a CSS class: `venv`, `.venv`, `.v`, `env39` and
@@ -126,9 +134,12 @@ def scanned_files():
             if path.name in _SKIP_NAMES or _is_virtualenv(path):
                 skip_roots.append(path)
             continue
-        if path.suffix not in SCANNED_SUFFIXES:
+        if path.suffix not in SCANNED_SUFFIXES and not _is_env_file(path):
             continue
-        if any(part in _SKIP_NAMES for part in path.parts):
+        # RELATIVE parts only. The absolute path includes every ancestor of
+        # the clone, so a checkout under ~/venv/ or ~/build/ matched the skip
+        # list on every file, scanned nothing, and printed "ok".
+        if any(part in _SKIP_NAMES for part in path.relative_to(REPO).parts):
             continue
         if any(root in path.parents for root in skip_roots):
             continue
@@ -220,6 +231,11 @@ def secret_check():
                 failed.append(f"{rel}:{lineno} contains {match[:6]}… — a "
                               f"32-char hex string, the shape of a 2captcha key")
 
+    if not scanned:
+        # A scan that read nothing has checked nothing; saying "ok" here is
+        # how a mis-rooted exclusion hid for months.
+        failed.append("credential scan read 0 files — the exclusions matched "
+                      "everything, so nothing was checked")
     if not failed:
         print(f"ok       {scanned} files scanned, nothing credential-shaped")
     return failed

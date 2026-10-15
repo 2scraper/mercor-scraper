@@ -2,7 +2,7 @@
 page_flow.py
 ------------
 The retry / solve / blocked decision, as DATA rather than as three copies of
-an if-chain (CLAUDE.md §1).
+an if-chain.
 
 Mercor answers a request five ways, and four of them want a different
 response:
@@ -29,7 +29,7 @@ Nothing here imports a browser, and **no JavaScript crosses this boundary**:
 Selenium's `execute_script` takes a function BODY with an explicit `return`
 while Playwright and pyppeteer take `() => expr`, so a shared snippet would
 quietly acquire one driver's dialect. The callbacks below are named for the
-OPERATION instead, and each engine spells it in its own dialect (§1).
+OPERATION instead, and each engine spells it in its own dialect.
 """
 
 import logging
@@ -47,7 +47,7 @@ log = logging.getLogger("page_flow")
 
 # How many job links mean "this response is the marketplace index".
 #
-# `> 1` on purpose, per CLAUDE.md §5: waiting for ONE match resolves on
+# `> 1` on purpose: waiting for ONE match resolves on
 # something unrelated — a nav link, a footer — long before the grid is really
 # there.
 #
@@ -65,7 +65,7 @@ MIN_CARD_MATCHES = 4
 
 # Anchored on a URL pattern, never a CSS class: Mercor's classes are
 # build-generated Tailwind strings that churn on every deploy, while
-# `/jobs/list_…` is a contract with search engines (§4).
+# `/jobs/list_…` is a contract with search engines.
 #
 # TWO spellings, and the second one is the whole reason this selector is
 # not the obvious one-liner. **Hydration rewrites every job anchor.**
@@ -87,8 +87,8 @@ MIN_CARD_MATCHES = 4
 # BLOCKING. On the first live run of this engine that turned mercor's
 # background reCAPTCHA v3 into "attempting to solve" on a page holding all
 # 390 rows; with an API key set, that is a charge per page for nothing
-# (CLAUDE.md §8 — detected is not blocking, and §19 — never pay for a
-# challenge that is not stopping you).
+# (detected is not blocking, and never pay for a challenge that is not
+# stopping you).
 #
 # Anything anchored to the DOM on this site needs checking in a real
 # browser and not in a capture. The capture is the pre-hydration document.
@@ -130,7 +130,7 @@ def content_timeout_ms(mode: str) -> int:
 #
 # Polled through `count(selector)` — a callback each engine implements with
 # its own `querySelectorAll` call — and NEVER by handing the browser a string
-# to evaluate. CLAUDE.md §18: a site whose Content-Security-Policy omits
+# to evaluate. A site whose Content-Security-Policy omits
 # `unsafe-eval` kills `wait_for_function` with an `EvalError` and takes the
 # run down with exit 1, on the site's most obvious URL. Mercor has not been
 # measured for that, and the cheap habit costs nothing on a site that would
@@ -170,7 +170,7 @@ def classify(html: Optional[str], status: Optional[int] = None,
     against a callee that took `status` second, and both crashed on their
     first fetch — invisible to import, `--help`, `compileall` and 400+ green
     offline assertions, because none of those calls a function the way a live
-    run does (§17). `smoke_test.py` binds every engine's call against this
+    run does. `smoke_test.py` binds every engine's call against this
     signature for that reason.
     """
     return detect_page_state(html or "", status, url, mode)
@@ -193,7 +193,7 @@ STATE_POLICY = {
     # A substantial page with no `__NEXT_DATA__` we could read. NOT "zero
     # jobs": a served page that parses to nothing is OUR bug, and reporting
     # it as an empty index sends the reader to check the URL instead of the
-    # parser (CLAUDE.md §20). Worth one retry in case the document was
+    # parser. Worth one retry in case the document was
     # caught mid-swap, and always worth a dump.
     "parse_error": {"retry": True,  "solve": False, "blocked": False, "parse": False},
     # A 404. Retrying an address that does not exist is pure waste, and it
@@ -226,12 +226,35 @@ def should_parse(state: str) -> bool:
     return STATE_POLICY.get(state, STATE_POLICY["unknown"])["parse"]
 
 
+# Numeric flags and the smallest value each can honestly take. A negative
+# delay or page count is not a request anyone means: `--pages 0` plans no
+# page at all and `--delay -1` reaches `time.sleep` as a ValueError deep in
+# the run. Refused at parse time, naming the flag, in every engine.
+# (`--retries` is validated on its own, because it counts ATTEMPTS.)
+NUMERIC_FLAG_FLOORS = (
+    ("pages", "--pages", 1),
+    ("concurrency", "--concurrency", 1),
+    ("delay", "--delay", 0),
+    ("retry_delay", "--retry-delay", 0),
+    ("proxy_block_retries", "--proxy-block-retries", 0),
+)
+
+
+def numeric_flag_error(args):
+    """The usage error for the first numeric flag below its floor, or None."""
+    for attr, flag, floor in NUMERIC_FLAG_FLOORS:
+        value = getattr(args, attr, None)
+        if value is not None and value < floor:
+            return "%s must be at least %s (got %s)" % (flag, floor, value)
+    return None
+
+
 # Whether a blocked page is worth re-fetching at all.
 #
 # True, and CONSULTED rather than merely documented — the engines read it,
 # so setting it False really does stop the retry loop. (A sibling repo
 # carried this constant with a paragraph of justification and no reader,
-# which is the same defect as dead code that looks load-bearing: §17.)
+# which is the same defect as dead code that looks load-bearing.)
 #
 # True is the cautious setting rather than a measured one here, and the
 # honest statement of the evidence is that there is none: Mercor has never
@@ -262,7 +285,7 @@ SOLVES_PER_PAGE = 1
 def pagination_is_addressable(url: str) -> bool:
     """Whether page N of this run can be fetched without walking to it.
 
-    CLAUDE.md §18 says to ask this PER URL rather than per site, and on
+    Ask this PER URL rather than per site: on
     Mercor the routes give opposite answers for opposite reasons:
 
       * `/explore` is NOT addressable, because it has no page 2 at all.
@@ -315,7 +338,7 @@ def concurrency_limit(cdp_endpoint: Optional[str]) -> Optional[int]:
 
     The Scraping Browser API allows ONE live connection per profile, so N
     workers sharing a `pid` collide with `profile_locked`. Several `pid`s,
-    one run each, is the way to parallelise that path (§7).
+    one run each, is the way to parallelise that path.
     """
     return 1 if cdp_endpoint else None
 
@@ -326,7 +349,7 @@ def concurrency_for_mode(mode: str, concurrency: int) -> int:
     `listings` and `careers` fetch exactly one page, so any worker past the
     first would have nothing to do. Clamping here rather than letting the
     engine start idle threads keeps the run's own log honest about what it
-    did — and CLAUDE.md §7 is explicit that concurrency without a proxy pool
+    did — concurrency without a proxy pool
     is a faster way to get an address scored than to gather data, which is a
     poor trade for threads that fetch nothing.
     """

@@ -166,7 +166,7 @@ class PageOutcome:
     # How many entries the same response's ItemList JSON-LD indexes. 326
     # against 390 records on 2026-09-18 — the gap is why the parser reads
     # the React Query cache, and recording it per run means nobody inherits
-    # the figure from a comment (§13).
+    # the figure from a comment.
     urls_in_itemlist: Optional[int] = None
     pages_available: Optional[int] = None
     # The page number the SERVER answered with. Always 1 here, because
@@ -284,8 +284,8 @@ class _Session:
         options.add_argument("--disable-blink-features=AutomationControlled")
         # Flag parity with the Playwright engine, and really applied rather
         # than accepted and ignored: Chrome takes the locale as --lang. It
-        # does NOT decide which listing is fetched — that is
-        # find_country in the URL — so this only affects what the browser
+        # does NOT decide which route is read — that is --mode, or --url —
+        # so this only affects what the browser
         # claims about itself.
         options.add_argument(f"--lang={self.args.locale}")
 
@@ -619,7 +619,7 @@ def _fetch_page_source(session, url: str, timeout_ms: int = 60000) -> str:
     return session.driver.page_source or ""
 
 
-def handle_captcha_if_present(session, args) -> bool:
+def handle_captcha_if_present(session, args, on_purchase=None) -> bool:
     """Detect and solve a challenge. True if something was solved.
 
     Same detectors, same reconciliation and the same "detected is not
@@ -657,6 +657,11 @@ def handle_captcha_if_present(session, args) -> bool:
     if not args.twocaptcha_key:
         logger.warning("No 2captcha API key, so this challenge cannot be solved.")
         return False
+    if on_purchase is not None:
+        # Counted HERE, at the one moment money is committed, rather than by
+        # the caller before it knows whether anything will be bought: a call
+        # that found no challenge must not spend the page's allowance.
+        on_purchase()
     try:
         token = solve_recaptcha(challenge, args.twocaptcha_key,
                                 api_version=args.captcha_api,
@@ -702,7 +707,7 @@ def _solve_budget(args, spent: int):
     page is classified and once after — and only the SECOND call was counted.
 
     INHERITED EVIDENCE, from a SIBLING repo and not from Mercor — labelled
-    because §13 says a number you inherited is not a number you measured,
+    because a number you inherited is not a number you measured,
     and this one cannot be reproduced here: Mercor has never rendered a
     challenge to this scraper, so no page of this site has ever bought a
     solve at all.
@@ -710,7 +715,7 @@ def _solve_budget(args, spent: int):
     On that sibling, from a datacenter address that meets a real Cloudflare
     challenge on every fetch (2026-09-17): ONE page bought THREE Turnstile
     solves, and every token was refused. The cap read as enforced and was
-    not (CLAUDE.md §17). Both call sites now go through here.
+    not. Both call sites now go through here.
 
     The fix is carried here anyway. A budget that is never exercised is
     still the difference between a bill and no bill on the day it is.
@@ -790,8 +795,11 @@ def _fetch_one_page(session, args, pool, page_num: int, url: str) -> PageOutcome
 
         # Counted, because it can BUY. See _solve_budget.
         if _solve_budget(args, solves_bought):
-            solves_bought += 1
-            if handle_captcha_if_present(session, args):
+            bought = []
+            solved = handle_captcha_if_present(
+                session, args, on_purchase=lambda: bought.append(1))
+            solves_bought += len(bought)
+            if solved:
                 time.sleep(1)
 
         elif solves_bought:
@@ -832,8 +840,11 @@ def _fetch_one_page(session, args, pool, page_num: int, url: str) -> PageOutcome
         # Bounded by SOLVES_PER_PAGE. Mirrors playwright_scraper.
         if (page_flow.should_solve(state)
                 and _solve_budget(args, solves_bought)):
-            solves_bought += 1
-            if handle_captcha_if_present(session, args):
+            bought = []
+            solved = handle_captcha_if_present(
+                session, args, on_purchase=lambda: bought.append(1))
+            solves_bought += len(bought)
+            if solved:
                 time.sleep(1)
                 html = d["content"]() or html
                 state = page_flow.classify(html, http_status,
@@ -848,7 +859,7 @@ def _fetch_one_page(session, args, pool, page_num: int, url: str) -> PageOutcome
 
         if not page_flow.should_retry(state):
             # "content" and "empty" are both final answers. An empty page is
-            # a CORRECT one — a hub category has no grid — so retrying it
+            # a CORRECT one — a payload with no records — so retrying it
             # would re-confirm the same right answer, and rotating the exit
             # would blame an address for the URL it was given.
             break
@@ -865,7 +876,7 @@ def _fetch_one_page(session, args, pool, page_num: int, url: str) -> PageOutcome
             d = _driver(session)
 
     if load_failed:
-        # NAME the proxy when it was the proxy. CLAUDE.md §8: a dead exit and
+        # NAME the proxy when it was the proxy. A dead exit and
         # a timeout want opposite responses — another try at the same exit
         # versus a different exit — so a message that cannot tell them apart
         # leaves the reader guessing which they got.
@@ -929,9 +940,9 @@ def _fetch_one_page(session, args, pool, page_num: int, url: str) -> PageOutcome
     # --cdp-endpoint the Scraping Browser's own auto-solve extension injects
     # such markers into every page it loads.
     # Only for a state page_flow already counts as BLOCKED. An EMPTY page is
-    # a correct answer, and a live run of a /p/<slug> hub reported exit 3 on
-    # a page the site had plainly served because the hub's own performance
-    # script names `akamaihd.net`. Mirrors playwright_scraper exactly.
+    # a correct answer, and a sibling repo once reported exit 3 on a page its
+    # site had plainly served because the site's own performance script
+    # named its CDN. Mirrors playwright_scraper exactly.
     vendor = (detect_bot_challenge(html, url=d["current_url"]())
               if page_flow.counts_as_blocked(state) else None)
     if vendor:
@@ -1188,7 +1199,7 @@ def scrape(args) -> int:
     # One-per-run context, in the sidecar rather than repeated down a column,
     # and byte-identical in shape to the other two engines. Mercor states no
     # catalogue total on any route, so what goes here is this run's OWN
-    # coverage arithmetic — which is what a bare "complete" hides (§21).
+    # coverage arithmetic — which is what a bare "complete" hides.
     indexed = next((o.urls_in_itemlist for o in outcomes
                     if o.urls_in_itemlist is not None), None)
     extra = {"route_is_paginated": args.mode == "job", "mode": args.mode}
@@ -1260,16 +1271,17 @@ def parse_args():
                         "page fetching lives in playwright_scraper.py.")
     p.add_argument("--retries", type=int, default=3,
                    help="Attempts per page load before giving up (default 3). "
-                        "A page that comes back EMPTY is not retried: an empty "
-                        "hub category is a correct answer, not a fault.")
+                        "A page that comes back EMPTY is not retried: an index "
+                        "or careers payload with no records is a correct "
+                        "answer, not a fault.")
     p.add_argument("--retry-delay", type=float, default=2.0,
                    help="Seconds before the first retry, doubling thereafter")
     p.add_argument("--format", choices=["json", "csv", "both"], default="both")
     p.add_argument("--out", default="mercor_jobs", help="Output file prefix")
     p.add_argument("--locale", default="en-US",
                    help="Browser locale (default en-US), passed to Chrome as "
-                        "--lang. It does NOT decide which directory is "
-                        "searched; that is find_country in the URL.")
+                        "--lang. It does NOT decide which route is "
+                        "read; that is --mode, or --url.")
     p.add_argument("--proxy", default=None,
                    help="Proxy URL. NOTE: Selenium cannot authenticate a "
                         "proxy; credentials are stripped and a warning says "
@@ -1326,7 +1338,13 @@ def parse_args():
     p.add_argument("--headless", action="store_true", default=True)
     p.add_argument("--headful", dest="headless", action="store_false")
     args = p.parse_args()
+    # Whether --url was TYPED, captured before the environment fills it: a
+    # MERCOR_URL from .env is a default, not a request.
+    typed_url = args.url
     env_config.apply(args)
+    bad_number = page_flow.numeric_flag_error(args)
+    if bad_number:
+        p.error(bad_number)
 
     # Spelled identically to the other two engines.
     #
@@ -1339,10 +1357,17 @@ def parse_args():
         if not ok:
             p.error(why)
         implied = mode_for_url(args.url)
-        if implied and implied != args.mode:
+        if implied and implied != args.mode and not typed_url:
+            # From the environment and naming another route: --mode wins and
+            # that mode's own default address is used.
+            print("[i] MERCOR_URL (%s) is read by --mode %s; ignoring it for "
+                  "--mode %s and using that mode's default address."
+                  % (args.url, implied, args.mode), file=sys.stderr)
+            args.url = None
+        elif implied and implied != args.mode:
             # Refused rather than silently corrected: reading a careers URL
             # under --mode listings would parse it with the wrong reader and
-            # report zero rows for a perfectly good page (CLAUDE.md §20).
+            # report zero rows for a perfectly good page.
             p.error("--url is a %s URL but --mode is %s. %s is read by "
                     "--mode %s; pass that, or drop --url and let --mode %s "
                     "use its own default."

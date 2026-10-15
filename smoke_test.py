@@ -2,7 +2,7 @@
 smoke_test.py — the offline suite for mercor-scraper.
 
 One file of plain functions with inline fixtures. No pytest, no conftest, no
-fixtures directory (CLAUDE.md §10); `tests/test_smoke.py` wraps this as a
+fixtures directory; `tests/test_smoke.py` wraps this as a
 single pytest test so `pytest` works as an entry point without a second copy
 of the checks.
 
@@ -51,6 +51,7 @@ it stays fixed:
 """
 
 import argparse
+import contextlib
 import ast
 import csv
 import inspect
@@ -134,11 +135,11 @@ CAREERS_HTML = r'''<html><head><link href="/_next/static/css/app.css"/><script>v
 # and `<p>Page not found</p>`. The real one carries neither: its visible
 # text is the empty string, on both the HTTP-client and the browser fetch.
 # So the body-marker check that ran against it passed against something
-# this site has never served — §21, a guard is only as good as the fixture
+# this site has never served. A guard is only as good as the fixture
 # it runs against, and the fixture that matters is the one fetched the way
 # a real run fetches.
 #
-# Scrubbed (§10), and only these, everything the site generates around them
+# Scrubbed, and only these, everything the site generates around them
 # left untouched: the Sentry trace and span ids, the CSP nonce and the
 # Sentry public key. They are per-request telemetry that grant nothing, but
 # a 32-hex string reads as a live credential to every scanner including
@@ -195,7 +196,7 @@ SITEMAP_XML = (
 # ---------------------------------------------------------------------------
 # The parser, asserted on VALUES rather than on coverage
 # ---------------------------------------------------------------------------
-# A column can be 100% populated and entirely wrong (CLAUDE.md §10), so every
+# A column can be 100% populated and entirely wrong, so every
 # check below pins a figure from the real capture rather than counting
 # non-nulls. The figures are the ones the live site returned on 2026-09-18.
 
@@ -270,7 +271,7 @@ def check_a_withheld_client_is_not_a_missing_value():
     """`company_name` is null on 291 of 390 live listings and that is the
     site withholding a client's name, not a parse failure.
 
-    The pair of columns is the point (CLAUDE.md §21: where a site publishes
+    The pair of columns is the point (where a site publishes
     a should-I-show-this flag, use it rather than inferring from the value).
     A null name beside `company_brand_visible=False` is WITHHELD; a null
     beside True would be genuinely unset and worth looking at.
@@ -293,7 +294,7 @@ def check_the_itemlist_indexes_fewer_records_than_the_payload():
     Measured on the live page 2026-09-18: 326 `ItemList` URLs against 390
     records, the 64 missing being all 55 `evergreen` listings plus 9
     standard. Anchoring on the JSON-LD would silently lose 16% of the
-    catalogue — a §8 "fail loudly" failure that fails quietly instead.
+    catalogue — a "fail loudly" failure that fails quietly instead.
     """
     from product_parser import (parse_listing_page, itemlist_urls,
                                 listings_from_html, EXPLORE_URL)
@@ -359,12 +360,12 @@ def check_every_rate_period_is_one_we_measured():
 
 
 def check_currency_is_never_defaulted():
-    """§4: absent is null, never a defaulted "USD".
+    """Absent is null, never a defaulted "USD".
 
     The /explore payload states no currency anywhere — measured 0 of 390 —
     so a listing row's `rate_currency` must be null even though 40 of 40
     sampled DETAIL pages said USD. Inferring it would be presenting a guess
-    as a fact (§8).
+    as a fact.
     """
     from product_parser import parse_listing_page, EXPLORE_URL
     rows = parse_listing_page(EXPLORE_HTML, url=EXPLORE_URL, page=1).rows
@@ -413,7 +414,7 @@ def check_careers_pay_spans_tiers_and_reads_its_own_currency():
 
 
 def check_a_stated_zero_survives_but_a_withheld_one_does_not():
-    """§21, both directions — and the canary caught the second one live.
+    """Both directions — and the canary caught the second one live.
 
     A zero and a missing value are different facts, and Ashby distinguishes
     them with `shouldDisplayCompensationOnJobPostings`:
@@ -477,7 +478,7 @@ def check_careers_rows_are_a_different_population():
 
 
 def check_the_detail_route_adds_what_the_index_does_not():
-    """§20: a detail page publishes a DIFFERENT shape from the listing.
+    """A detail page publishes a DIFFERENT shape from the listing.
 
     Neither is a subset of the other here, which is why `data_source` is a
     column: the index has `domain`, `posted_at` and the slot counters; the
@@ -504,7 +505,7 @@ def check_the_detail_route_adds_what_the_index_does_not():
 
 
 def check_the_listing_parser_finds_nothing_on_a_detail_page():
-    """Stated directly, because it is the silent failure (§20).
+    """Stated directly, because it is the silent failure.
 
     Pointing the listing reader at a detail page returns zero rows and no
     error. `--mode` selects the reader, and this pins what happens if it is
@@ -520,7 +521,7 @@ def check_the_listing_parser_finds_nothing_on_a_detail_page():
 
 
 def check_page_url_refuses_to_invent_a_second_page():
-    """§7/§18: `/explore` has no page 2, so building one is the bug.
+    """`/explore` has no page 2, so building one is the bug.
 
     `?page=2`, `?limit=`, `?offset=` and `?domain=` each returned a
     byte-identical payload on 2026-09-18. A constructed page URL would
@@ -620,7 +621,7 @@ def check_url_building_and_routes():
 
 
 def check_unsupported_urls_are_refused_with_a_reason():
-    """§5: refuse WITH THE REASON. A wrong reason sends the reader hunting
+    """Refuse WITH THE REASON. A wrong reason sends the reader hunting
     for a typo in a URL that is spelled correctly."""
     from product_parser import is_supported_url, EXPLORE_URL, CAREERS_URL
     ok, why = is_supported_url(EXPLORE_URL)
@@ -646,7 +647,7 @@ def check_unsupported_urls_are_refused_with_a_reason():
 
 
 def check_every_engine_threads_an_http_status_to_the_classifier():
-    """§8: on this site the status is very nearly the ONLY signal.
+    """On this site the status is very nearly the ONLY signal.
 
     Measured live 2026-09-18 against a withdrawn job:
 
@@ -744,7 +745,7 @@ def check_a_withdrawn_listing_is_not_an_empty_one():
 
 
 def check_page_states_on_real_captures():
-    """§17: order the signals by how much they PROVE, not by how cheap they
+    """Order the signals by how much they PROVE, not by how cheap they
     are. A payload with records in it is content, and nothing overrides it.
     """
     from product_parser import detect_page_state, EXPLORE_URL, CAREERS_URL
@@ -791,14 +792,14 @@ def check_page_states_on_real_captures():
     equal("a served page holding no records is empty, not blocked",
           detect_page_state(empty, 200, EXPLORE_URL, "listings"), "empty")
     # Substantial, served, and unreadable is OUR bug and gets its own name
-    # so it cannot be read as an empty category (§20).
+    # so it cannot be read as an empty category.
     equal("a big page with no payload is a parse_error, not empty",
           detect_page_state("<html><body>" + "x" * 5000 + "</body></html>",
                             200, EXPLORE_URL, "listings"), "parse_error")
 
 
 def check_no_marker_matches_a_page_mercor_serves():
-    """§18, and this one caught a real mistake an hour after it was made.
+    """And this one caught a real mistake an hour after it was made.
 
     `/cdn-cgi/challenge-platform` was briefly in the marker set. It is
     Cloudflare's ordinary bot-management script and it appears once on EVERY
@@ -817,7 +818,7 @@ def check_no_marker_matches_a_page_mercor_serves():
     check("...and it is NOT a marker",
           not any("cdn-cgi" in m for m in BOT_CHALLENGE_MARKERS),
           str(BOT_CHALLENGE_MARKERS))
-    # §8/§19: the extension the Scraping Browser injects puts `cf-turnstile`
+    # The extension the Scraping Browser injects puts `cf-turnstile`
     # into every page it loads, so that marker fires on good pages and has
     # been measured MISSING from real challenges in two sibling repos.
     check("`cf-turnstile` is not carried",
@@ -836,14 +837,14 @@ def check_no_marker_matches_a_page_mercor_serves():
 
 
 def check_positive_asset_detection_is_documented_as_useless_here():
-    """§18 inverted, and worth pinning because two sibling repos rely on it.
+    """A recommended marker inverted, and worth pinning because two sibling repos rely on it.
 
     "Was this built out of the site's own assets?" is the structural signal
     that works elsewhere. On Mercor the 404 is the same Next.js app, so it
     references `/_next/static` MORE than a real page does — 32 against
     23-27 live. A threshold would rank the one page that is not content
     above every page that is. This check PINS the limitation rather than
-    half-guarding it (§10).
+    half-guarding it.
     """
     from product_parser import references_own_assets
     check("a served page references the site's own assets",
@@ -856,7 +857,8 @@ def check_positive_asset_detection_is_documented_as_useless_here():
 
 
 def check_the_sites_own_captcha_is_recorded_even_though_it_never_renders():
-    """§18: "no challenge rendered" is not "no captcha configured".
+    """A captcha that never renders: "no challenge rendered" is not "no
+    captcha configured".
 
     `work.mercor.com` runs invisible reCAPTCHA Enterprise on every page
     including its 404s; `www.mercor.com` runs none at all, so `--mode
@@ -865,10 +867,10 @@ def check_the_sites_own_captcha_is_recorded_even_though_it_never_renders():
 
     The sitekey is in NO served HTML and in none of the eagerly-loaded JS
     chunks — it arrives in a lazily-loaded bundle — so a static grep finds
-    nothing and only a real browser reveals it. That makes the usual §18
+    nothing and only a real browser reveals it. That makes the usual
     advice ("grep a good page for the site's own captcha config") come up
     empty here, which is worth a check that asserts the CURRENT behaviour so
-    a future change is a decision rather than a surprise (§10).
+    a future change is a decision rather than a surprise.
     """
     from product_parser import site_turnstile_sitekey
     equal("no sitekey is published in the served markup of the index",
@@ -888,11 +890,11 @@ def check_the_sites_own_captcha_is_recorded_even_though_it_never_renders():
     check("...and that the variant is inferred rather than confirmed",
           "inferred rather than confirmed" in solver,
           "an unchallenging v2-invisible is indistinguishable from v3 from "
-          "outside, and §8 says the wrong parameters buy a rejected token")
+          "outside, and the wrong parameters buy a rejected token")
     check("...and that it is invisible to a capture",
           "lazily-loaded bundle" in solver or "lazily loaded bundle" in solver)
     # A sitekey inside an extension's script tag is the Scraping Browser's
-    # own auto-solve extension, not the site (§8).
+    # own auto-solve extension, not the site.
     injected = ('<html><body><script src="chrome-extension://abc/content/'
                 'captcha/turnstile/hunter.js" data-sitekey="0xNOTMERCORS">'
                 '</script></body></html>')
@@ -956,7 +958,7 @@ def check_every_tracked_field_exists_on_the_row_class():
 
 
 def check_row_schema():
-    """The family prefix is byte-identical and in order (§9), and the
+    """The family prefix is byte-identical and in order, and the
     columns this site cannot fill are ABSENT rather than null."""
     from output_writer import JobPosting, SOURCE_DEFAULT
     names = [f.name for f in fields(JobPosting)]
@@ -965,7 +967,7 @@ def check_row_schema():
     equal("source names the site, which is served on two hosts",
           SOURCE_DEFAULT, "mercor.com")
     # A job board has no price, currency-on-a-product, discount, stock or
-    # brand. Six columns null on every row of every run is what §9 forbids.
+    # brand. Six columns null on every row of every run should not exist.
     for absent in ("price", "currency", "discount_pct", "in_stock", "brand",
                    "original_price", "rating"):
         check("no `%s` column on a job board" % absent, absent not in names)
@@ -974,7 +976,7 @@ def check_row_schema():
                     "domain", "company_brand_visible", "data_source"):
         check("the column `%s` is present" % present, present in names)
     # The 21 fields that are constant across all 390 live listings are not
-    # columns. Removing one needs the measurement written down (§9), and it
+    # columns. Removing one needs the measurement written down, and it
     # is in output_writer's docstring.
     for dropped in ("match_quality", "submitted_on", "user_similarity_score",
                     "application_steps_pending", "prequalified_listing"):
@@ -987,7 +989,7 @@ def check_row_schema():
 
 
 def check_page_and_position_are_unique_across_pages():
-    """§18: `position` restarts at 1 on every page, so without the page
+    """`position` restarts at 1 on every page, so without the page
     number beside it a row from page 2 claims a slot page 1 already used."""
     from product_parser import parse_listing_page, EXPLORE_URL
     rows = []
@@ -1001,7 +1003,7 @@ def check_page_and_position_are_unique_across_pages():
 
 
 def check_fixtures_carry_no_personal_names():
-    """§10: a real capture can carry a person's name; these routes do not.
+    """A real capture can carry a person's name; these routes do not.
 
     Guarded by PATTERN rather than by the old literals, so a FUTURE capture
     that does carry one is caught rather than only this one being clean.
@@ -1015,7 +1017,7 @@ def check_fixtures_carry_no_personal_names():
             found = re.search(pattern, html)
             check("the %s fixture carries no %s" % (name, pattern),
                   found is None, found.group(0) if found else "")
-    # And no session material (§10): a real dump carries the session that
+    # And no session material: a real dump carries the session that
     # fetched it.
     for name, html in (("explore", EXPLORE_HTML), ("detail", DETAIL_HTML),
                        ("careers", CAREERS_HTML)):
@@ -1047,7 +1049,7 @@ DRIVER_IMPORTS = {
     "puppeteer_scraper": "pyppeteer",
 }
 
-# The family contract (CLAUDE.md §9), re-derived across the repos rather
+# The family contract, re-derived across the repos rather
 # than copied from that list — which was itself wrong for months.
 CONTRACT_FLAGS = {
     "--url", "--pages", "--category", "--format", "--out", "--delay",
@@ -1065,10 +1067,10 @@ CONTRACT_FLAGS = {
 # because the site offers no ordering control and no per-country host.
 SITE_FLAGS = {"--mode", "--domain", "--locale"}
 
-# §12: wording the build fails on. Assembled from pieces rather than written
+# Wording the build fails on. Assembled from pieces rather than written
 # out, so this file can scan ITSELF — three sibling repos exempted
 # `smoke_test.py` wholesale, which made the file most likely to acquire a
-# stray phrase the one file nobody scanned (CLAUDE.md §22).
+# stray phrase the one file nobody scanned.
 BANNED_WORDING = (
     "cloud " + "browser", "anti" + "detect browser",
     "2scraper Anti" + "detect Browser",
@@ -1098,7 +1100,7 @@ def check_state_policy():
           page_flow.should_retry("blocked")
           and page_flow.should_solve("blocked")
           and page_flow.counts_as_blocked("blocked"))
-    # A served page we could not read is OUR bug, never "0 jobs" (§20), so
+    # A served page we could not read is OUR bug, never "0 jobs", so
     # it neither counts as blocked nor buys a solve.
     check("parse_error: retried once, never solved, NOT blocked",
           page_flow.should_retry("parse_error")
@@ -1121,7 +1123,7 @@ def check_state_policy():
 
 
 def check_policy_constants_have_a_consumer():
-    """§17: a policy constant nothing reads is the same defect as dead code.
+    """A policy constant nothing reads is the same defect as dead code.
 
     `RETRY_ON_BLOCKED` carried a paragraph of justification in a sibling repo
     and no engine consulted it, so setting it False changed nothing.
@@ -1233,7 +1235,7 @@ def check_a_run_that_finds_nothing_writes_nothing():
         code = save([], prefix, "json", allow_empty=True)
         equal("--allow-empty WRITES the empty file...", 
               json.load(open(prefix + ".json", encoding="utf-8")), [])
-        # ...and still reports exit 4. Pinned deliberately (§10: pin a known
+        # ...and still reports exit 4. Pinned deliberately (pin a known
         # behaviour rather than half-guarding it): "zero businesses" is true
         # whether or not the file was written, and a caller that wanted the
         # file still wants to know the result was empty.
@@ -1302,7 +1304,7 @@ def check_engines_import_their_driver_at_module_level():
 
 
 def check_shared_calls_bind_against_the_real_signature():
-    """§17's check #1, and the one that earns its keep.
+    """Bind every shared call, and the check that earns its keep.
 
     A sibling repo shipped `classify(html, url=…)` in two of three engines
     against a callee taking `status` second, and BOTH crashed on their first
@@ -1419,7 +1421,7 @@ def _argparse_flags(module_name):
 
 
 def check_engine_flag_sets():
-    """§17's check #2: against the contract AND against each other, both ways.
+    """Flag sets: against the contract AND against each other, both ways.
 
     A missing flag fails; so does closing a difference the README documents.
     """
@@ -1436,7 +1438,7 @@ def check_engine_flag_sets():
     # and could not launch it on the development machine, so it needs a way
     # to point at another one. Its twins have no equivalent because they do
     # not ship a browser. Listed here so that closing the difference — or
-    # growing a second one — fails the build (§17).
+    # growing a second one — fails the build.
     DOCUMENTED_DIFFERENCES = {"puppeteer_scraper": {"--chromium-path"}}
     names = sorted(sets)
     for i in range(len(names) - 1):
@@ -1450,7 +1452,7 @@ def check_engine_flag_sets():
 
 
 def check_the_concurrency_difference_is_documented_in_both_directions():
-    """§20: the exception list IS the documentation.
+    """The exception list IS the documentation.
 
     All three engines take `--concurrency` because it is in the family's CLI
     contract, but only the Playwright engine implements it — the other two
@@ -1505,14 +1507,14 @@ def check_banned_and_removed_flags():
     per-country site, so such a flag could only contradict what the URL
     already says. On `fingerprint_client.py` the same name is legitimate —
     there it picks a fingerprint locale, not a target — which is why this
-    check is scoped to the engines rather than to the tree (CLAUDE.md §10).
+    check is scoped to the engines rather than to the tree.
 
     What the rule is really about is a flag that can disagree with the URL.
     The equivalent on this site IS enforced, and there are two of them:
 
       * `--url` and `--mode` are refused when they name different routes,
         because reading a careers URL with the listings reader returns zero
-        rows from a perfectly good page (§20).
+        rows from a perfectly good page.
       * `--domain` is refused with `--mode careers`, because that route
         publishes a `department` and no `domain` at all — a filter that can
         never match would silently empty the output.
@@ -1535,7 +1537,7 @@ def check_banned_and_removed_flags():
 
 
 def check_undefined_names_in_every_module():
-    """§10: compileall proves a file PARSES, not that its names RESOLVE.
+    """`compileall` proves a file PARSES, not that its names RESOLVE.
 
     A live run of a sibling repo's pyppeteer engine died with NameError on a
     line reached only while fetching, after an import had been removed — the
@@ -1593,7 +1595,7 @@ def _import_graph(entrypoint):
 
 
 def check_dockerfile_copies_everything_the_entrypoint_imports():
-    """§10: all three repos in this family shipped an image that died with
+    """All three repos in this family shipped an image that died with
     ModuleNotFoundError on every invocation, --help included, because
     proxy_pool.py was missing from the COPY list. CI never built the image;
     this check needs no Docker."""
@@ -1641,7 +1643,7 @@ def check_env_example_documents_exactly_what_the_loader_reads():
 
 
 def check_a_copied_env_example_reads_as_UNSET():
-    """§17: `cp .env.example .env` followed by a run must not connect.
+    """`cp .env.example .env` followed by a run must not connect.
 
     The placeholder check was a literal set in a sibling repo, and the two
     credentialled URLs are documented the way the vendor documents them —
@@ -1655,14 +1657,17 @@ def check_a_copied_env_example_reads_as_UNSET():
         check(".env.example exists", False)
         return
     text = open(example, encoding="utf-8").read()
-    values = dict(re.findall(r"^([A-Z][A-Z0-9_]+)=(.*)$", text, re.M))
+    # A commented-out `# NAME=value` counts as documented: MERCOR_URL ships
+    # that way so a copied example cannot hijack --mode (see
+    # check_a_url_from_the_environment_does_not_block_another_mode).
+    values = dict(re.findall(r"^(?:#\s*)?([A-Z][A-Z0-9_]+)=(.*)$", text, re.M))
     check("the example actually sets every variable",
           set(values) == set(env_config.ENV_KEYS),
           "example has %s, loader reads %s"
           % (sorted(values), sorted(env_config.ENV_KEYS)))
     # Every CREDENTIAL must read as unset. The default TARGET must not: it is
     # a real, usable URL, and blanking it would remove the one setting this
-    # file exists to make convenient (§17's check #3 says exactly this — the
+    # file exists to make convenient (the round-trip rule says exactly this — the
     # credentials unset, the non-credential default still usable).
     CREDENTIALS = {"TWOCAPTCHA_KEY", "MERCOR_CDP_ENDPOINT", "MERCOR_PROXY"}
     before = dict(os.environ)
@@ -1696,7 +1701,7 @@ def check_a_copied_env_example_reads_as_UNSET():
 def check_ci_greps_for_a_sentinel_this_suite_can_actually_emit():
     """The `engine-smoke` job must be ABLE to fail.
 
-    That job exists for one reason (CLAUDE.md §10): "skipped, engine absent"
+    That job exists for one reason: "skipped, engine absent"
     reads identically to a real import error, so CI installs each engine and
     fails if THAT engine's group still reports a skip. It works by grepping
     the suite's own output for a sentinel.
@@ -1705,7 +1710,7 @@ def check_ci_greps_for_a_sentinel_this_suite_can_actually_emit():
     imported"` — a string no suite in this family emits. Checked 2026-09-18,
     seven sibling repos carry the same dead grep, so in none of them could
     the job ever have failed. It passed for the wrong reason, which is
-    §22's "a check that swallows the loudest failure it could report".
+    "a check that swallows the loudest failure it could report".
 
     This check is the guard against that coming back: whatever sentinel the
     workflow looks for, this suite has to be capable of printing it. It
@@ -1715,7 +1720,7 @@ def check_ci_greps_for_a_sentinel_this_suite_can_actually_emit():
     """
     workflow = os.path.join(HERE, ".github", "workflows", "tests.yml")
     if not os.path.isdir(os.path.join(HERE, ".github")):
-        # §22: trigger on the WHOLE .github directory being absent — which
+        # Trigger on the WHOLE .github directory being absent — which
         # is the Docker image, where it is deliberately not COPYed — and
         # never on a file inside it going missing, because a check that
         # quietly starts passing once its input disappears is the failure
@@ -1758,7 +1763,7 @@ def check_ci_greps_for_a_sentinel_this_suite_can_actually_emit():
 
 
 def check_credential_scan_is_one_implementation_invoked_from_both():
-    """§17: two sources of truth, one dead and one holed.
+    """Two sources of truth, one dead and one holed.
 
     `.github/ci_checks.py` sat in three repos invoked by NOTHING, while
     tests.yml carried an inline grep doing a narrower version of the same job
@@ -1775,7 +1780,7 @@ def check_credential_scan_is_one_implementation_invoked_from_both():
     # file being missing: two suites in this family run INSIDE the Docker
     # image, which deliberately COPYs no .github/, and a check that quietly
     # starts passing once its input disappears is the same failure this
-    # function is about (CLAUDE.md §22).
+    # function is about.
     if not os.path.isdir(workflow_dir):
         skip("ci-wiring", "no .github/ in this tree (the Docker image)")
     elif os.path.exists(workflow):
@@ -1804,7 +1809,7 @@ def check_credential_scan_is_one_implementation_invoked_from_both():
                   "tests.yml's offline job mentions %r — one implementation, "
                   "in ci_checks.py, invoked from both" % marker)
         # And the guard must have had something to read, or it passed for the
-        # wrong reason (CLAUDE.md §22).
+        # wrong reason.
         check("...and the offline job was actually found to scan",
               "ci_checks.py" in offline, "no offline job in tests.yml")
     result = subprocess.run([sys.executable, script, "--all"], cwd=HERE,
@@ -1826,7 +1831,7 @@ def check_the_credential_scan_survives_a_venv_in_the_tree():
     The fix is structural rather than a longer list of names — a directory
     holding `pyvenv.cfg` is a virtualenv whatever it is called — and this
     pins BOTH halves, because narrowing a credential scan is exactly how one
-    stops catching things. CLAUDE.md §22 records a sibling repo whose scan
+    stops catching things. A sibling repo's scan once
     caught an UNTRACKED `.env.bak` holding a live key, so scanning must not
     be reduced to tracked files.
     """
@@ -1865,7 +1870,7 @@ def check_the_credential_scan_survives_a_venv_in_the_tree():
 
 
 def check_banned_wording():
-    """§12: enforced by this test rather than by review."""
+    """Enforced by this test rather than by review."""
     for root, dirs, files in os.walk(HERE):
         dirs[:] = [d for d in dirs if d not in
                    (".git", "__pycache__", ".pytest_cache", "node_modules")]
@@ -1883,7 +1888,7 @@ def check_banned_wording():
 
 
 def check_concurrency_with_the_browser_stubbed():
-    """§10: a live run cannot always reach this machinery.
+    """A live run cannot always reach this machinery.
 
     Page 1 is fetched alone and decides how many pages there are, so a
     blocked page 1 means the workers never start. Driven directly instead,
@@ -2029,7 +2034,7 @@ def check_worker_pools_start_on_different_exits():
 
 
 def check_fingerprint_kwargs_are_ones_the_driver_accepts():
-    """§10: an unknown key in new_context(**kwargs) is a TypeError at launch,
+    """An unknown key in new_context(**kwargs) is a TypeError at launch,
     on the PAID path, at runtime."""
     engine = _import_engine("playwright_scraper")
     if engine is None:
@@ -2088,7 +2093,7 @@ def check_every_engine_exposes_the_same_public_surface():
 
 def check_every_solve_is_counted_against_the_budget():
     """`SOLVES_PER_PAGE` is a MONEY limit, so every call that can buy must be
-    counted — CLAUDE.md §17's "a policy constant nothing reads".
+    counted, or it is a policy constant nothing reads.
 
     `handle_captcha_if_present` is called TWICE per attempt in every engine:
     once before the page is classified (so a challenge is cleared before
@@ -2112,7 +2117,7 @@ def check_every_solve_is_counted_against_the_budget():
         if not os.path.exists(path):
             continue
         source = open(path, encoding="utf-8").read()
-        calls = source.count("if handle_captcha_if_present(")
+        calls = source.count("solved = handle_captcha_if_present(")
         check("%s calls the solver from two places, as designed" % module,
               calls == 2, "found %d call site(s)" % calls)
         # Both must sit under a budget test. Counting the guard is the cheap
@@ -2121,17 +2126,27 @@ def check_every_solve_is_counted_against_the_budget():
         check("%s gates BOTH solve call sites on the budget" % module,
               guards == calls,
               "%d budget guard(s) for %d call site(s)" % (guards, calls))
-        check("%s increments the counter beside each guard" % module,
-              source.count("solves_bought += 1") == calls,
-              "%d increment(s) for %d call site(s)"
-              % (source.count("solves_bought += 1"), calls))
+        # Counted by what was BOUGHT, not by the call: a pre-classification
+        # call that found nothing used to spend the page's whole allowance,
+        # so the post-classification solve the policy asks for on a gated
+        # page could never run.
+        incs = source.count("solves_bought += len(bought)")
+        check("%s counts only real purchases beside each guard" % module,
+              incs == calls and "solves_bought += 1" not in source,
+              "%d purchase count(s) for %d call site(s)" % (incs, calls))
+        fn = source[source.index("def handle_captcha_if_present("):]
+        fn = fn[:fn.index("\ndef ")]
+        check("%s reports a purchase before it is made" % module,
+              "on_purchase()" in fn
+              and fn.index("on_purchase()") < fn.index("solve_recaptcha("),
+              "on_purchase() must precede solve_recaptcha(")
     # And the constant must still be the one thing that decides it.
     import page_flow
     equal("at most one purchase per page", page_flow.SOLVES_PER_PAGE, 1)
 
 
 def check_a_dead_proxy_is_reported_as_a_proxy_failure():
-    """CLAUDE.md §8: a proxy failure is not a timeout, and the two want
+    """A proxy failure is not a timeout, and the two want
     opposite responses — another try at the same exit versus a different one.
 
     The engines all compute the reason (`_proxy_failure`) and, WITH a pool,
@@ -2154,7 +2169,7 @@ def check_a_dead_proxy_is_reported_as_a_proxy_failure():
         # Anchored on the GIVE-UP branch — the one that reports and returns —
         # not on the `if load_failed: break` inside the retry loop, which
         # comes first in the file and would make this check read the wrong
-        # block and pass for the wrong reason (CLAUDE.md §22).
+        # block and pass for the wrong reason.
         marker = "        outcome.load_failed = True"
         if marker not in source:
             check("%s has a give-up branch to check" % module, False)
@@ -2187,7 +2202,7 @@ def check_a_dead_proxy_is_reported_as_a_proxy_failure():
 
 
 def check_engines_do_not_evaluate_a_string_in_the_browser():
-    """§18: a site whose CSP omits `unsafe-eval` kills wait_for_function with
+    """A site whose CSP omits `unsafe-eval` kills wait_for_function with
     an EvalError and takes the run down with exit 1, on the site's most
     obvious URL. Mercor has not been measured for that, and the cheap habit
     costs nothing on a site that would have allowed it."""
@@ -2205,7 +2220,7 @@ def check_engines_do_not_evaluate_a_string_in_the_browser():
 
 
 def check_credentials_never_reach_a_log():
-    """§8: an EXCEPTION MESSAGE is a log, and the masker must be GLOBAL.
+    """An EXCEPTION MESSAGE is a log, and the masker must be GLOBAL.
 
     A Playwright connection error repeats the endpoint five times (the
     message plus a four-line call log), so a masker handling only the first
@@ -2260,7 +2275,7 @@ def _tree_state():
 
 
 def check_no_test_mutates_the_working_tree():
-    """§10: one suite used its own file as a fake chromedriver and chmod'd it
+    """One suite used its own file as a fake chromedriver and chmod'd it
     to 755, leaving a mode change in git status.
 
     Compares the tree against how it looked when the suite STARTED, not
@@ -2278,7 +2293,7 @@ def check_no_test_mutates_the_working_tree():
 
 
 def check_captcha_capability_claims_match_the_code():
-    """§19: the most expensive bug this family can ship is a SENTENCE.
+    """The most expensive bug this family can ship is a SENTENCE.
 
     It fails in both directions and this family has shipped both:
 
@@ -2552,6 +2567,398 @@ def check_no_engine_branches_on_a_mode_that_does_not_exist():
                          and n.comparators[0].value not in modes})
         check("%s branches only on real modes" % eng, not ghosts,
               "ghost mode(s): %s" % ghosts if ghosts else "")
+
+
+
+# ---------------------------------------------------------------------------
+# Output contract, environment defaults, credential scan, ignore shapes,
+# private citations (2026-10-15)
+# ---------------------------------------------------------------------------
+
+def check_a_failed_write_keeps_the_previous_good_output():
+    """An interrupted write must not destroy the last good file.
+
+    `open(path, "w")` truncates first, so a write that failed on an
+    unserialisable row used to leave 96 bytes of invalid JSON where a good
+    1,042-byte result was.
+    """
+    import output_writer as O
+    from output_writer import JobPosting
+    good = [JobPosting(sku="good-1", title="Good")]
+    with tempfile.TemporaryDirectory() as tmp:
+        prefix = os.path.join(tmp, "out")
+        with contextlib.redirect_stdout(io.StringIO()):
+            O.save(good, prefix, "both")
+            O.write_run_meta(prefix, {"status": "complete"})
+        before = {ext: open(prefix + ext, "rb").read()
+                  for ext in (".json", ".csv", ".meta.json")}
+
+        class Boom(Exception):
+            pass
+
+        def explode(*a, **k):
+            raise Boom("disk full")
+
+        saved_dump, saved_writerow = O.json.dump, O.csv.DictWriter.writerow
+        try:
+            O.json.dump = lambda obj, f, **k: (f.write('[{"partial": '), explode())
+            for ext, call in ((".json", lambda: O.write_json(good, prefix + ".json")),
+                              (".meta.json", lambda: O.write_run_meta(
+                                  prefix, {"status": "failed"}))):
+                try:
+                    call()
+                except Boom:
+                    pass
+                equal("a failed %s write leaves the previous file intact" % ext,
+                      open(prefix + ext, "rb").read(), before[ext])
+            O.json.dump = saved_dump
+            O.csv.DictWriter.writerow = explode
+            try:
+                O.write_csv(good, prefix + ".csv")
+            except Boom:
+                pass
+            equal("a failed .csv write leaves the previous file intact",
+                  open(prefix + ".csv", "rb").read(), before[".csv"])
+        finally:
+            O.json.dump = saved_dump
+            O.csv.DictWriter.writerow = saved_writerow
+        equal("no temporary file is left behind",
+              sorted(n for n in os.listdir(tmp) if n.endswith(".tmp")), [])
+
+
+def check_output_files_get_the_mode_open_would_have_given_them():
+    """A temp file is created 0600 and a rename keeps that. A new output must
+    get `0o666 & ~umask` (what `open()` gives it); an existing one keeps its
+    own mode. A flat 0644 would narrow 0664 under umask 002."""
+    if os.name != "posix":
+        skip("output file modes", "not a POSIX system")
+        return
+    import output_writer as O
+    from output_writer import JobPosting
+    rows = [JobPosting(sku="m-1", title="Mode")]
+    with tempfile.TemporaryDirectory() as tmp:
+        for umask in (0o022, 0o002, 0o077):
+            old = os.umask(umask)
+            try:
+                path = os.path.join(tmp, "new_%03o.json" % umask)
+                O.write_json(rows, path)
+                mode = os.stat(path).st_mode & 0o777
+            finally:
+                os.umask(old)
+            equal("a new file under umask %03o is %03o" % (umask, 0o666 & ~umask),
+                  "%03o" % mode, "%03o" % (0o666 & ~umask))
+        path = os.path.join(tmp, "existing.csv")
+        open(path, "w").close()
+        os.chmod(path, 0o640)
+        O.write_csv(rows, path)
+        equal("an existing file keeps its own mode",
+              "%03o" % (os.stat(path).st_mode & 0o777), "640")
+
+
+def check_csv_cells_that_a_spreadsheet_would_execute_are_escaped():
+    """Titles, descriptions and company names are written by third parties;
+    a cell starting = + - @ TAB CR LF is executed by a spreadsheet."""
+    import output_writer as O
+    from output_writer import JobPosting
+    row = JobPosting(sku="f-1", title='=HYPERLINK("http://x","y")',
+                     company_name="+cmd", eligible_locations=["=1+1", "ok"],
+                     rate_min=-5.0)
+    clean = JobPosting(sku="f-2", title="Plain title", company_name="-")
+    with tempfile.TemporaryDirectory() as tmp, \
+            contextlib.redirect_stdout(io.StringIO()):
+        prefix = os.path.join(tmp, "out")
+        code = O.finish_run([row, clean], prefix, "both", False, blocked=False,
+                            stop_reason="completed", pages_requested=1,
+                            pages_completed=1, start_url="u", final_url="u",
+                            extra={"csv_cells_escaped": "site-data"})
+        equal("a run with formula-shaped cells still exits 0", code, 0)
+        with open(prefix + ".csv", encoding="utf-8", newline="") as f:
+            cells = list(csv.DictReader(f))
+        equal("a formula title is prefixed with an apostrophe",
+              cells[0]["title"], '\'=HYPERLINK("http://x","y")')
+        equal("a + cell is escaped", cells[0]["company_name"], "'+cmd")
+        equal("a joined list is escaped AFTER joining",
+              cells[0]["eligible_locations"], "'=1+1 | ok")
+        equal("a NUMBER stays a number, negative or not", cells[0]["rate_min"],
+              "-5.0")
+        equal("a lone dash is text and is escaped too",
+              cells[1]["company_name"], "'-")
+        equal("a plain cell is untouched", cells[1]["title"], "Plain title")
+        loaded = json.load(open(prefix + ".json", encoding="utf-8"))
+        equal("JSON keeps the site's bytes", loaded[0]["title"],
+              '=HYPERLINK("http://x","y")')
+        meta = json.load(open(prefix + ".meta.json", encoding="utf-8"))
+        equal("the caller's own extra wins a name collision",
+              meta["csv_cells_escaped"], "site-data")
+        O.finish_run([row], prefix, "csv", False, blocked=False,
+                     stop_reason="completed", pages_requested=1,
+                     pages_completed=1, start_url="u", final_url="u")
+        meta = json.load(open(prefix + ".meta.json", encoding="utf-8"))
+        equal("the sidecar counts the escaped cells",
+              meta.get("csv_cells_escaped"), 3)
+
+
+def _engine_with_stub_driver(name):
+    """Load an engine with its driver library replaced by stand-ins, so the
+    argument checks below run in every venv, including the core-only one
+    CI's offline job uses. Loaded under a private module name and with
+    sys.modules restored afterwards, so the import-skip checks elsewhere see
+    the real state of the environment."""
+    import importlib.util
+    import types
+
+    class Stub(types.ModuleType):
+        def __getattr__(self, attr):
+            if attr.startswith("__"):
+                raise AttributeError(attr)
+            value = type(attr, (Exception,), {})
+            setattr(self, attr, value)
+            return value
+
+    stubbed = ("playwright", "playwright.sync_api", "pyppeteer",
+               "pyppeteer.errors", "selenium",
+               "selenium.webdriver", "selenium.common",
+               "selenium.common.exceptions", "selenium.webdriver.chrome",
+               "selenium.webdriver.chrome.options",
+               "selenium.webdriver.chrome.service",
+               "selenium.webdriver.common", "selenium.webdriver.common.by",
+               "selenium.webdriver.support", "selenium.webdriver.support.ui",
+               "webdriver_manager", "webdriver_manager.chrome")
+    saved = {m: sys.modules.get(m) for m in stubbed}
+    try:
+        for m in stubbed:
+            sys.modules[m] = Stub(m)
+        spec = importlib.util.spec_from_file_location(
+            "_stubbed_" + name, os.path.join(HERE, name + ".py"))
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        return module
+    finally:
+        for m, v in saved.items():
+            if v is None:
+                sys.modules.pop(m, None)
+            else:
+                sys.modules[m] = v
+
+
+def _parse_cli_args(name, argv, env=None):
+    """Run a CLI's parse_args: (args, exit code, stderr). Engines get a
+    stubbed driver. `env` goes in as environment variables, the same path a
+    `.env` takes through env_config.apply; the developer's own `.env` is not
+    read."""
+    import env_config
+    if name == "scraper_api_client":
+        import scraper_api_client as module
+    else:
+        module = _engine_with_stub_driver(name)
+    saved_argv, saved_load = sys.argv, env_config.load_env
+    saved_env = {k: os.environ.pop(k) for k in list(os.environ)
+                 if k.startswith("MERCOR_") or k == "TWOCAPTCHA_KEY"}
+    err = io.StringIO()
+    code, args = None, None
+    try:
+        env_config.load_env = lambda *a, **k: None
+        os.environ.update(env or {})
+        sys.argv = [name + ".py"] + argv
+        with contextlib.redirect_stderr(err), \
+                contextlib.redirect_stdout(io.StringIO()):
+            try:
+                args = module.parse_args()
+            except SystemExit as e:
+                code = e.code
+    finally:
+        sys.argv = saved_argv
+        env_config.load_env = saved_load
+        for k in (env or {}):
+            os.environ.pop(k, None)
+        os.environ.update(saved_env)
+    return args, code, err.getvalue()
+
+
+def check_a_url_from_the_environment_does_not_block_another_mode():
+    """MERCOR_URL is a DEFAULT. `cp .env.example .env` used to set it to the
+    index, after which `--mode careers` and `--mode job` exited 2 with
+    "--url is a listings URL but --mode is careers" — for a user who never
+    typed --url."""
+    import product_parser as P
+    env = {"MERCOR_URL": P.EXPLORE_URL}
+    for name in ENGINES + ("scraper_api_client",):
+        for mode in ("careers", "job"):
+            if name == "scraper_api_client" and mode == "job":
+                continue
+            args, code, err = _parse_cli_args(name, ["--mode", mode], env)
+            check("%s: an environment URL for another route does not block "
+                  "--mode %s" % (name, mode),
+                  code is None and args is not None
+                  and (args.url or "") != P.EXPLORE_URL, err.strip()[-200:])
+        args, code, err = _parse_cli_args(name, [], env)
+        check("%s: ...and with no --mode the environment URL is used" % name,
+              code is None and args is not None and args.url == P.EXPLORE_URL,
+              err.strip()[-200:])
+        args, code, err = _parse_cli_args(
+            name, ["--url", P.EXPLORE_URL, "--mode", "careers"])
+        check("%s: a TYPED --url that disagrees with --mode is still refused"
+              % name, code == 2 and "--mode" in err, err[-200:])
+    args, code, err = _parse_cli_args("scraper_api_client", ["--mode", "careers"])
+    check("scraper_api_client: --mode careers needs no --url",
+          code is None and args is not None and args.url == P.CAREERS_URL,
+          err.strip()[-200:])
+    text = open(os.path.join(HERE, ".env.example"), encoding="utf-8").read()
+    check(".env.example ships MERCOR_URL commented out, not as a default",
+          not re.search(r"^MERCOR_URL=", text, re.M)
+          and re.search(r"^#\s*MERCOR_URL=", text, re.M), "")
+
+
+def _tracked_files():
+    root = pathlib.Path(HERE)
+    try:
+        out = subprocess.run(["git", "ls-files"], cwd=HERE, capture_output=True,
+                             text=True, check=True).stdout.split("\n")
+        files = [root / f for f in out if f]
+    except (OSError, subprocess.CalledProcessError):
+        files = [p for p in root.rglob("*") if p.is_file()
+                 and ".git" not in p.relative_to(root).parts]
+    return [f for f in files if f.is_file()]
+
+
+def check_no_private_citations_in_shipped_files():
+    """Public files state their reasons in their own words. A pointer into a
+    document the reader cannot open (an instruction file, or a numbered
+    section of one) explains nothing. Tokens are assembled from pieces so
+    this file does not match itself."""
+    banned = re.compile("|".join((
+        re.escape("CLAUDE" + ".md"), "claude" + "_2scraper",
+        "2scraper" + "_repo_rules", "play" + "book", chr(0xA7))))
+    hits = []
+    for path in _tracked_files():
+        if path.suffix.lower() in (".png", ".jpg", ".ico", ".gz", ".zip"):
+            continue
+        try:
+            text = path.read_text(encoding="utf-8")
+        except (UnicodeDecodeError, OSError):
+            continue
+        for lineno, line in enumerate(text.splitlines(), 1):
+            if banned.search(line):
+                hits.append("%s:%d" % (path.relative_to(HERE), lineno))
+    check("no shipped file cites a private instruction file or its sections",
+          not hits, "%d line(s): %s" % (len(hits), ", ".join(hits[:10])))
+
+
+def check_no_other_sites_vocabulary_in_help_or_comments():
+    """Help text and comments once described sibling sites as this one:
+    `--locale` named another site's query parameter and a `--country` flag
+    these engines do not have, and `--retries` described an empty page in
+    a third site's terms. Tokens are assembled so this file does not match itself.
+    CHANGELOG.md is history and is not scanned."""
+    tokens = ("find" + "_country", "hub " + "categor", "/p/" + "<slug>",
+              "akamai" + "hd", "shop" + "_rating", "use_" + "antidetect")
+    hits = []
+    for path in _tracked_files():
+        if path.name == "CHANGELOG.md" or path.suffix not in (
+                ".py", ".md", ".yml", ".example", ".toml"):
+            continue
+        for lineno, line in enumerate(
+                path.read_text(encoding="utf-8").splitlines(), 1):
+            if any(t in line for t in tokens):
+                hits.append("%s:%d" % (path.relative_to(HERE), lineno))
+    check("no shipped help or comment uses another site's vocabulary",
+          not hits, ", ".join(hits[:10]))
+
+
+def check_counting_flags_refuse_values_below_their_floor():
+    """`--pages 0`, `--delay -1` and friends are refused at parse time with
+    an error naming the flag, in every engine (run with a stubbed driver so
+    this holds in the core-only venv too)."""
+    import page_flow
+    for name in ENGINES:
+        for attr, flag, floor in page_flow.NUMERIC_FLAG_FLOORS:
+            bad = str(floor - 1)
+            args, code, err = _parse_cli_args(name, [flag + "=" + bad])
+            check("%s: %s %s is a usage error naming the flag" % (name, flag, bad),
+                  code == 2 and flag in err.splitlines()[-1] if err else False,
+                  err.strip()[-160:])
+            args, code, err = _parse_cli_args(name, [flag + "=" + str(floor)])
+            check("%s: %s %s is accepted" % (name, flag, floor),
+                  code is None and args is not None, err.strip()[-160:])
+
+
+def check_credential_scan_is_relative_to_the_repo_and_never_scans_nothing():
+    """The scan skipped a path whose ABSOLUTE parts held `venv`, `build` or
+    `env`, so a clone under ~/venv/ scanned 0 files and printed "ok".
+    Exclusions are judged relative to the repository, a zero-file scan
+    fails, and a `.env.bak` or a `.json` holding a key is read."""
+    ci_dir = os.path.join(HERE, ".github")
+    if not os.path.isdir(ci_dir):
+        skip("credential scan location", "no .github in this tree")
+        return
+    import shutil
+    key = "".join("ab" for _ in range(16))
+    with tempfile.TemporaryDirectory() as tmp:
+        clone = os.path.join(tmp, "venv", "build", "env", "repo")
+        os.makedirs(os.path.join(clone, ".github"))
+        shutil.copy(os.path.join(ci_dir, "ci_checks.py"),
+                    os.path.join(clone, ".github", "ci_checks.py"))
+        with open(os.path.join(clone, "notes.py"), "w") as f:
+            f.write("x = 1\n")
+        run = lambda: subprocess.run(
+            [sys.executable, os.path.join(clone, ".github", "ci_checks.py"),
+             "--secret-check"], capture_output=True, text=True, cwd=clone)
+        r = run()
+        check("a clean clone under venv/build/env parents scans files and passes",
+              r.returncode == 0 and " 0 files" not in r.stdout,
+              (r.stdout + r.stderr)[-300:])
+        with open(os.path.join(clone, "planted.py"), "w") as f:
+            f.write("# %s\n" % key)
+        r = run()
+        check("...and a key planted there fails the scan",
+              r.returncode != 0 and "planted.py" in r.stdout + r.stderr,
+              (r.stdout + r.stderr)[-300:])
+        os.remove(os.path.join(clone, "planted.py"))
+        with open(os.path.join(clone, ".env.bak"), "w") as f:
+            f.write("TWOCAPTCHA_KEY=%s\n" % key)
+        r = run()
+        check("...and so does one in an untracked .env.bak",
+              r.returncode != 0 and ".env.bak" in r.stdout + r.stderr,
+              (r.stdout + r.stderr)[-300:])
+        os.remove(os.path.join(clone, ".env.bak"))
+        with open(os.path.join(clone, "fixture.json"), "w") as f:
+            f.write('{"note": "%s"}\n' % key)
+        r = run()
+        check("...and so does one in a .json file",
+              r.returncode != 0 and "fixture.json" in r.stdout + r.stderr,
+              (r.stdout + r.stderr)[-300:])
+    import importlib.util
+    spec = importlib.util.spec_from_file_location(
+        "_ci_checks_probe", os.path.join(ci_dir, "ci_checks.py"))
+    ci = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(ci)
+    ci.scanned_files = lambda: iter(())
+    with contextlib.redirect_stdout(io.StringIO()):
+        failed = ci.secret_check()
+    check("a scan that reads 0 files fails instead of saying ok",
+          any("0 files" in f for f in failed), repr(failed))
+
+
+def check_dump_and_capture_shapes_are_ignored():
+    """`--dump-html X --pages 3` writes X.page3, which `*.json` does not
+    cover; a raw page saved at the top of the repo, or a live-run directory,
+    is one `git add -A` from a commit."""
+    try:
+        subprocess.run(["git", "rev-parse"], cwd=HERE, capture_output=True,
+                       check=True)
+    except (OSError, subprocess.CalledProcessError):
+        skip("gitignore shapes", "not a git checkout")
+        return
+    ignored = lambda p: subprocess.run(["git", "check-ignore", "-q", p],
+                                       cwd=HERE).returncode == 0
+    for path in ("dump.page2", "x.page3", "canary_dump.json.page3",
+                 "live/x.html", "results/x.html", "tmp/x.html", "root.html",
+                 "out/run.json", ".env.bak", ".env.local"):
+        check("%s is ignored" % path, ignored(path))
+    for path in ("sample_output.json", "sample_output.csv", ".env.example",
+                 ".github/workflows/tests.yml", "tests/test_smoke.py",
+                 "smoke_test.py"):
+        check("%s is NOT ignored" % path, not ignored(path))
 
 
 CHECKS = [v for k, v in sorted(globals().items()) if k.startswith("check_")]

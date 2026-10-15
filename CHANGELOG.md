@@ -11,6 +11,60 @@ it from a bill or from a diff.
 
 ## [Unreleased]
 
+> **Behaviour changes in this section.** `--pages`/`--concurrency` below 1
+> and a negative `--delay`, `--retry-delay` or `--proxy-block-retries` are
+> now usage errors (exit 2) in every engine. A `MERCOR_URL` from `.env` that
+> names a different route from the `--mode` you type is now ignored for that
+> run instead of exiting 2, and `.env.example` ships it commented out. CSV
+> cells that begin with `=`, `+`, `-`, `@`, a tab or a line break now get a
+> leading apostrophe (CSV only; JSON is unchanged; the sidecar records
+> `csv_cells_escaped`). Output files are replaced atomically and keep their
+> mode.
+
+### Fixed (2026-10-15)
+
+- **A failed write no longer destroys the previous good output.** JSON, CSV
+  and `<out>.meta.json` were opened with `"w"`, so a write that failed
+  halfway (measured: an unserialisable row) left a 1,042-byte `out.json` as
+  96 bytes of invalid JSON. Each file is now written to a temporary file in
+  the same directory, flushed, fsynced and renamed over the target; the
+  temporary file is removed on error. A new file gets the mode `open()`
+  would have given it (`0o666 & ~umask`); an existing file keeps its own.
+- **CSV formula cells are neutralised.** Titles, descriptions and company
+  names are third-party text; a cell beginning with a formula character is
+  prefixed with `'` (after list columns are joined), numbers are left alone,
+  and the count goes in the sidecar under any value the caller set.
+- **`cp .env.example .env` no longer breaks `--mode job` and `--mode
+  careers`.** The example set `MERCOR_URL` to the index, which the URL/mode
+  check then treated as if the user had typed `--url`. The engines and
+  `scraper_api_client.py` now remember whether `--url` was typed; a typed URL
+  that disagrees with `--mode` is still refused. `scraper_api_client.py`
+  now also refuses a typed URL for another route and defaults the index and
+  careers modes to their own address.
+- **The captcha allowance is spent by purchases, not by checks.** The first
+  of the two solve call sites counted itself against `SOLVES_PER_PAGE`
+  before knowing whether a challenge existed, so on a page that classified
+  as blocked the solve the state policy asks for could never run. The count
+  now happens at the moment a task is submitted; still at most one purchase
+  per page.
+- **The credential scan read nothing from some checkouts.** Its skip list
+  was matched against the ABSOLUTE path, so a clone under any directory
+  named `build`, `venv`, `env`, `.venv` or `__pycache__` scanned 0 files and
+  printed "ok". Exclusions are now relative to the repository, a scan of 0
+  files fails, and `.env*` files and `.json`/`.csv`/`.toml`/`.cfg`/`.ini`/
+  `.sh` files are read too.
+- `.gitignore` covers `--dump-html` page files without an `.html` suffix
+  (`X.page2`), raw `.html` dumps at the top level and live-run directories
+  (`live/`, `out/`, `results/`, `tmp/`, ...).
+- `--locale` and `--retries` help, and several comments, described other
+  sites' parameters and pages; they now describe Mercor's.
+- Comments, docstrings, workflows and the README pointed at numbered
+  sections of an instruction file readers cannot open. The reasons are now
+  stated in place, and a check fails if such a pointer returns.
+- Canary: the careers job no longer requires 80% of roles to publish a
+  salary (that is the employer's choice); it now requires every published
+  salary figure to be parsed into a rate.
+
 Text and data copied from sibling repos when this one was bootstrapped,
 describing those sites as if they were this one.
 

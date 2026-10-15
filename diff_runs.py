@@ -87,7 +87,7 @@ from output_writer import UNIQUE_BY_SKU_MODES
 # reports success. `smoke_test.py` now pins every name against the dataclass.
 #
 # A shop's fields are absent because a job has no price, stock or discount —
-# porting them would be dead code that looks load-bearing (CLAUDE.md §4).
+# porting them would be dead code that looks load-bearing.
 # What changes on a Mercor listing is its PAY, its TERMS, its ELIGIBILITY
 # and the client behind it.
 #
@@ -151,7 +151,7 @@ TRACKED_FIELDS = (
 # both ways in sample_output.json. So diffing a listings run against a job
 # run would report each of these as a change on every row, and none of it
 # would be about the job. When the two rows disagree on `data_source`, they are
-# reported as `source_changed` rather than as changes (§8: a difference that
+# reported as `source_changed` rather than as changes (a difference that
 # comes with a provenance difference says something about our own two
 # snapshots, not about the site).
 DETAIL_ONLY_FIELDS = (
@@ -349,7 +349,7 @@ def _check_comparable(args) -> bool:
     # parameter of any kind — `?page`, `?limit`, `?offset` and `?domain`
     # each returned a byte-identical payload on 2026-09-18 — so there is no
     # sort to disagree about and no `sort` column on the row. A guard here
-    # would have no input and would pass for the wrong reason (§22).
+    # would have no input and would pass for the wrong reason.
     #
     # What DOES change which rows are in a file here is the MODE, which is
     # guarded above, and in `--mode job` how many pages were fetched out of
@@ -371,8 +371,8 @@ def _check_comparable(args) -> bool:
         # not: /explore is not the whole site. 72 of the 462 listings
         # enumerated on 2026-09-18 appeared only in the sitemap, so a
         # `removed` line in a listings diff can mean "this listing left the
-        # index", which is not the same as "this job is gone". CLAUDE.md
-        # §21 — complete and exhaustive are different words.
+        # index", which is not the same as "this job is gone". 
+        # Complete and exhaustive are different words.
         if meta.get("mode") == "listings" and meta.get("records_in_payload"):
             print(f"[i] {label} ({path}) is a /explore run: it holds every "
                   f"listing the index serves, which is not every listing "

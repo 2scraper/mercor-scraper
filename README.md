@@ -282,7 +282,7 @@ Three things about it matter:
    this repo's detector classifies it as — but a v2-invisible that simply
    never challenged would look identical from outside. Nothing here depends
    on the answer, since no solve is ever attempted; it is flagged because
-   §8 says a v3 parameter sent for a v2-invisible widget buys a token the
+   a v3 parameter sent for a v2-invisible widget buys a token the
    site rejects, so anyone who *does* start solving here should settle the
    variant against a real challenge first.
 
@@ -317,6 +317,11 @@ it is never sent to an API as if it were a key.
 
 Variables: `TWOCAPTCHA_KEY`, `MERCOR_CDP_ENDPOINT`, `MERCOR_PROXY`,
 `MERCOR_URL`.
+
+`MERCOR_URL` ships commented out, because every mode already has a default.
+If you set it and then type a `--mode` that reads a different route, the
+variable is ignored for that run; a typed `--url` that disagrees with
+`--mode` is still refused.
 
 ---
 
