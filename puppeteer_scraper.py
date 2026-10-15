@@ -94,8 +94,8 @@ from product_parser import (MODES, DEFAULT_MODE, category_from_url,
                             mode_for_url, page_url, parse_detail,
                             parse_listing_page, parse_careers_page,
                             references_own_assets, site_turnstile_sitekey,
-                            enumerate_job_urls, sitemap_job_urls,
-                            listings_from_html, route_of,
+                            enumerate_job_sources, EnumerationResult,
+                            route_of,
                             EXPLORE_URL, CAREERS_URL, SITEMAP_URL)
 from output_writer import (dedupe_by_key, finish_run, EXIT_API_ERROR,
                            SOURCE_DEFAULT)
@@ -567,54 +567,15 @@ def _plan_page_urls(args, page_one_url, pages_available, job_urls=None):
     return planned
 
 
-def _enumerate_jobs(fetch_source, args):
-    """Every job URL this run could fetch, in a stable order.
+def _enumerate_jobs(fetch_source, args) -> EnumerationResult:
+    """Every job address this run could fetch, and whether that list is whole.
 
-    The union of two sources, because **neither contains the other**.
-    Measured 2026-09-18: `/sitemap.xml` holds 447 job URLs, the `/explore`
-    payload holds 390, they share 375, and the union is 462. Three of the 72
-    sitemap-only listings were opened by hand and all three were live. A run
-    enumerating from either source alone would miss real work while
-    reporting a complete run.
-
-    `fetch_source` is a callable the ENGINE supplies, so both fetches leave
-    from the same exit as the pages they plan — a run whose sitemap came
-    from one address and whose jobs came from another is two runs wearing
-    one sidecar. It must return the serialised document rather than its
-    text: Chromium renders XML through its own viewer, and `content()` keeps
-    all 463 `<loc>` elements intact where a text reading does not.
-
-    Sitemap order leads because it is Mercor's own publication order and is
-    stable between runs, which keeps `--pages 20` fetching the SAME twenty
-    jobs each night rather than a different twenty.
+    The logic is `product_parser.enumerate_job_sources`, shared by all three
+    engines; `fetch_source` is supplied by this engine so both reads leave
+    from the same exit as the pages they plan.
     """
-    sitemap_xml = ""
-    try:
-        sitemap_xml = fetch_source(SITEMAP_URL)
-    except Exception as exc:  # noqa: BLE001 - any driver error is the same here
-        logger.warning("Could not read %s (%s). Falling back to the /explore "
-                       "payload alone, which held 390 of the 462 listings "
-                       "measured on 2026-09-18.", SITEMAP_URL, exc)
-    explore_html = ""
-    try:
-        explore_html = fetch_source(EXPLORE_URL)
-    except Exception as exc:  # noqa: BLE001
-        logger.warning("Could not read %s (%s). Falling back to the sitemap "
-                       "alone.", EXPLORE_URL, exc)
-
-    urls = enumerate_job_urls(sitemap_xml, explore_html)
-    if not urls:
-        logger.error("Neither %s nor %s yielded a single job URL, so this "
-                     "run has no work to do.", SITEMAP_URL, EXPLORE_URL)
-        return []
-    n_sitemap = len(sitemap_job_urls(sitemap_xml))
-    n_explore = len(listings_from_html(explore_html))
-    logger.info("Enumerated %d job(s): %d from the sitemap, %d in the "
-                "/explore payload, %d in both. Neither source is a superset "
-                "of the other on this site.",
-                len(urls), n_sitemap, n_explore,
-                n_sitemap + n_explore - len(urls))
-    return urls
+    return enumerate_job_sources(fetch_source, scrub=_mask_credentials,
+                                 attempts=args.retries, pause=time.sleep)
 
 
 def _parse_for_mode(html: str, url: str, args, page_num: int = 1):
@@ -838,7 +799,7 @@ def _fetch_one_page(session, args, pool, page_num: int, url: str) -> PageOutcome
                                    args.retries, text[:120], pause)
                     time.sleep(pause)
 
-        if load_failed and block_attempt < block_retries:
+        if load_failed and has_pool and block_attempt < block_retries:
             pool.advance("unusable exit or repeated load failure")
             session.relaunch()
             bridge, page = session.bridge, session.page
@@ -925,13 +886,31 @@ def _fetch_one_page(session, args, pool, page_num: int, url: str) -> PageOutcome
         # so a different exit is the only thing that plausibly changes the
         # outcome.
         if block_attempt < block_retries:
-            logger.warning("Page %d came back as %s from %s — retrying from "
-                           "another exit (%d/%d).", page_num, state,
-                           mask(pool.current), block_attempt + 1, block_retries)
-            pool.advance(f"{state} on page {page_num}")
-            session.relaunch()
-            bridge, page = session.bridge, session.page
-            d = _driver(session)
+            if has_pool:
+                logger.warning("Page %d came back as %s from %s — retrying "
+                               "from another exit (%d/%d).", page_num, state,
+                               mask(pool.current), block_attempt + 1,
+                               block_retries)
+                pool.advance(f"{state} on page {page_num}")
+                session.relaunch()
+                bridge, page = session.bridge, session.page
+                d = _driver(session)
+            else:
+                # No pool, so nowhere else to go — but a plain re-fetch is
+                # what clears this on a Scraping Browser profile. The browser
+                # is NOT relaunched: over `--cdp-endpoint` a profile allows
+                # one live connection, so tearing the session down and
+                # reconnecting risks `profile_locked`. Mirrors the Playwright
+                # engine, whose branch this was missing: with no `--proxy`
+                # the line above dereferenced `pool.current` on None and the
+                # run died with AttributeError — on any retryable page state,
+                # which no live run had reached until a page was unreadable.
+                pause = args.retry_delay * (block_attempt + 1)
+                logger.warning("Page %d came back as %s — re-fetching through "
+                               "the same access path in %.1fs (%d/%d).",
+                               page_num, state, pause, block_attempt + 1,
+                               block_retries)
+                time.sleep(pause)
 
     if load_failed:
         # NAME the proxy when it was the proxy. A dead exit and
@@ -1122,6 +1101,9 @@ def scrape(args) -> int:
     # the session block, so the reporting path cannot raise UnboundLocalError
     # on a run that had already done all its work.
     total_enumerated = 0
+    # How whole the enumeration was, or None when this mode enumerates
+    # nothing; bound here so the reporting path cannot raise on it.
+    enumeration = None
 
     pool = proxy_pool_from_args(args)
     if pool and args.cdp_endpoint:
@@ -1147,8 +1129,9 @@ def scrape(args) -> int:
         # content decides how many pages there are, so the order reverses.
         job_urls = []
         if args.mode == "job" and not _is_single_job_url(args):
-            job_urls = _enumerate_jobs(
+            enumeration = _enumerate_jobs(
                 lambda u: _fetch_page_source(session, u), args)
+            job_urls = enumeration.urls
             if not job_urls:
                 return finish_run(
                     [], args.out, args.format, args.allow_empty,
@@ -1201,12 +1184,20 @@ def scrape(args) -> int:
                                   if p.sku is None or p.sku not in seen_keys)
                 seen_keys.update(p.sku for p in outcome.products
                                  if p.sku is not None)
-                if not fresh_count:
+                if (not fresh_count
+                        and page_flow.a_page_without_rows_ends_the_run(args.mode)):
                     logger.info("Page %d added no rows not already seen — "
                                 "treating that as the end of the listing.",
                                 page_num)
                     stop_reason = "no_new_products"
                     break
+                if not fresh_count:
+                    # --mode job: every page is an independent address, so
+                    # one adding nothing (a withdrawn listing, a duplicate)
+                    # says nothing about the next.
+                    logger.info("Page %d (%s) added no rows (%s) — continuing "
+                                "with the rest of the queue.", page_num,
+                                outcome.url, outcome.state or "empty")
 
                 if index + 1 < len(planned):
                     time.sleep(args.delay)
@@ -1247,13 +1238,10 @@ def scrape(args) -> int:
     pages_available = next((o.pages_available for o in outcomes
                             if o.pages_available is not None), None)
     if args.mode == "listings" and all_rows:
-        logger.info("--mode listings fetches everything /explore serves, and "
-                    "/explore is not everything Mercor publishes: 72 of the "
-                    "462 listings enumerated on 2026-09-18 appeared only in "
-                    "the sitemap. Use --mode job to cover them.")
+        logger.info(page_flow.LISTINGS_NOT_EXHAUSTIVE_NOTE)
 
-    ok_pages = [o for o in outcomes if o.ok]
-    failed_pages = [o.page_num for o in outcomes if not o.ok]
+    ok_pages, failed_pages, unreadable_pages = page_flow.account_for_pages(
+        outcomes)
     final_url = (max(ok_pages, key=lambda o: o.page_num).final_url
                  if ok_pages else args.url)
 
@@ -1264,16 +1252,37 @@ def scrape(args) -> int:
     indexed = next((o.urls_in_itemlist for o in outcomes
                     if o.urls_in_itemlist is not None), None)
     extra = {"route_is_paginated": args.mode == "job", "mode": args.mode}
+    if unreadable_pages:
+        # Pages the site served and this parser could not read — by number,
+        # so the loss is a list a reader can act on rather than a count.
+        extra["pages_unreadable"] = unreadable_pages
     if args.mode == "listings":
         extra["records_in_payload"] = total_available
         extra["urls_in_itemlist"] = indexed
         extra["pages_available"] = pages_available
     elif args.mode == "job":
         extra["jobs_enumerated"] = total_enumerated or None
+        if enumeration is not None:
+            extra.update(enumeration.as_sidecar())
         extra["jobs_fetched"] = len(ok_pages)
+        # Addresses the site answered "gone" for. A withdrawn listing is an
+        # ordinary event here (the enumeration is built before any address
+        # is fetched), so it does not make the run partial — but it is
+        # recorded BY ADDRESS, because "complete" with fewer rows than
+        # `jobs_fetched` would otherwise read as rows lost without a trace.
+        gone = [o.url for o in sorted(outcomes, key=lambda o: o.page_num)
+                if o.ok and o.state == "not_found"]
+        extra["jobs_not_found"] = len(gone)
+        if gone:
+            extra["urls_not_found"] = gone
     if args.domain:
         extra["domain_filter"] = args.domain
 
+    # A run that fetched every address it was GIVEN is still short when the
+    # list it was given was a fallback — see page_flow.reconcile_stop_reason.
+    stop_reason = page_flow.reconcile_stop_reason(
+        stop_reason, None if enumeration is None else enumeration.complete,
+        unreadable_pages)
     return finish_run(all_rows, args.out, args.format, args.allow_empty,
                       blocked=blocked, stop_reason=stop_reason,
                       pages_requested=args.pages, pages_completed=len(ok_pages),
@@ -1304,15 +1313,7 @@ def parse_args():
                         "query parameters, so nothing here reduces what is "
                         "downloaded. --mode listings and --mode job only.")
     p.add_argument("--mode", choices=list(MODES), default=DEFAULT_MODE,
-                   help="listings (default): work.mercor.com/explore, the "
-                        "marketplace index — 390 contract roles in ONE "
-                        "response; --pages does not apply. job: one listing "
-                        "per page, enumerated from the sitemap and the index "
-                        "(462 jobs measured 2026-09-18); the only mode that "
-                        "covers the listings the index does not show. "
-                        "careers: www.mercor.com/careers, Mercor's OWN "
-                        "salaried openings via Ashby — a different "
-                        "population with its own id space.")
+                   help=page_flow.MODE_HELP)
     p.add_argument("--category", default=None,
                    help="Label to tag the run with in the sidecar. Defaults "
                         "to what the run selects. Mercor's routes carry no "
@@ -1354,13 +1355,7 @@ def parse_args():
     p.add_argument("--captcha-api", choices=["v2", "v1"], default="v2")
     p.add_argument("--solve-captcha", choices=["when-blocked", "always"],
                    default="when-blocked",
-                   help="when-blocked (default): only pay to solve a "
-                        "reCAPTCHA if the content is not already readable. "
-                        "always: solve whenever one is detected. Note that "
-                        "NO challenge has ever been observed on this site — a "
-                        "refused request gets no page at all — so neither "
-                        "setting has anything to act on today, and neither "
-                        "helps with a refusal.")
+                   help=page_flow.SOLVE_CAPTCHA_HELP)
     p.add_argument("--min-score", type=float, default=0.7)
     p.add_argument("--cdp-endpoint", default=None,
                    help="Connect to a running browser over CDP, e.g. "
@@ -1371,9 +1366,7 @@ def parse_args():
                    help="Save the exact HTML the parser is given, on success "
                         "as well as failure.")
     p.add_argument("--locale", default="en-US",
-                   help="Browser locale (default en-US), passed to Chromium "
-                        "as --lang. It does NOT decide which route is "
-                        "read; that is --mode, or --url.")
+                   help=page_flow.LOCALE_HELP + " Passed to Chromium as --lang.")
     p.add_argument("--fingerprint", action="store_true",
                    help="Fetch a browser fingerprint from 2captcha's "
                         "Fingerprint API and apply it to the launched "
@@ -1410,6 +1403,9 @@ def parse_args():
     bad_number = page_flow.numeric_flag_error(args)
     if bad_number:
         p.error(bad_number)
+
+    if args.retries < 1:
+        p.error(page_flow.RETRIES_MUST_BE_POSITIVE)
 
     # Spelled identically to the other two engines.
     #
@@ -1448,11 +1444,7 @@ def parse_args():
         # Said out loud rather than silently ignored. Measured, not assumed:
         # every pagination parameter tried on /explore returned a
         # byte-identical payload on 2026-09-18.
-        logger.warning("--pages %d is ignored in --mode %s: the route holds "
-                       "its whole result set in ONE response and honours no "
-                       "pagination parameter. --mode job is the mode that "
-                       "pages — there a page is one job.",
-                       args.pages, args.mode)
+        logger.warning(page_flow.PAGES_IGNORED_WARNING, args.pages, args.mode)
         args.pages = 1
 
     if args.category is None:

@@ -84,7 +84,7 @@ from product_parser import (MODES, DEFAULT_MODE, category_from_url,
                             mode_for_url, page_url, parse_detail,
                             parse_listing_page, parse_careers_page,
                             references_own_assets, site_turnstile_sitekey,
-                            enumerate_job_urls, listing_meta, sku_from_url,
+                            enumerate_job_sources, EnumerationResult, listing_meta, sku_from_url,
                             route_of, EXPLORE_URL, CAREERS_URL, SITEMAP_URL)
 from output_writer import (dedupe_by_key, finish_run, EXIT_API_ERROR,
                            SOURCE_DEFAULT)
@@ -316,62 +316,19 @@ def _is_single_job_url(args) -> bool:
     return bool(args.url) and route_of(args.url) == "job"
 
 
-def _enumerate_jobs(session, args) -> List[str]:
-    """Every job URL this run could fetch, in a stable order.
+def _enumerate_jobs(session, args) -> EnumerationResult:
+    """Every job address this run could fetch, and whether that list is whole.
 
-    The union of two sources, because **neither contains the other**.
-    Measured 2026-09-18: `/sitemap.xml` holds 447 job URLs, the `/explore`
-    payload holds 390, they share 375, and the union is 462. Three of the
-    72 sitemap-only listings were opened by hand and all three answered 200
-    with `status: active` — they are live jobs that the index simply does
-    not show. A run that enumerated from either source alone would miss
-    real work and report a complete run while doing it.
-
-    Both fetches go through the browser SESSION rather than through a
-    separate HTTP client, so the enumeration leaves from the same exit as
-    the pages it plans — a run whose sitemap came from one address and
-    whose jobs came from another is two runs wearing one sidecar.
-
-    Chromium renders XML through its own viewer, and that was checked
-    rather than assumed: `page.content()` on the sitemap keeps all 463
-    `<loc>` elements intact, so `sitemap_job_urls` reads it unchanged.
-
-    Sitemap order leads because it is Mercor's own publication order and is
-    stable between runs, which keeps `--pages 20` fetching the SAME twenty
-    jobs each night rather than a different twenty — otherwise a nightly
-    diff reports churn that is an artefact of the ordering.
+    The logic is `product_parser.enumerate_job_sources`, shared by all three
+    engines. Both reads go through the browser SESSION so they leave from the
+    same exit as the pages they plan; Chromium renders XML through its own
+    viewer and `page.content()` keeps all `<loc>` elements intact (checked
+    2026-09-18: 463).
     """
-    sitemap_xml = ""
-    try:
-        sitemap_xml = _fetch_page_source(session, SITEMAP_URL)
-    except Exception as exc:  # noqa: BLE001 - any driver error is the same here
-        logger.warning("Could not read %s (%s). Falling back to the "
-                       "/explore payload alone, which held 390 of the 462 "
-                       "listings measured on 2026-09-18 — the run will be "
-                       "short by whatever the sitemap would have added.",
-                       SITEMAP_URL, exc)
-    explore_html = ""
-    try:
-        explore_html = _fetch_page_source(session, EXPLORE_URL)
-    except Exception as exc:  # noqa: BLE001
-        logger.warning("Could not read %s (%s). Falling back to the sitemap "
-                       "alone.", EXPLORE_URL, exc)
-
-    urls = enumerate_job_urls(sitemap_xml, explore_html)
-    if not urls:
-        logger.error("Neither %s nor %s yielded a single job URL. There is "
-                     "nothing to enumerate, so this run has no work to do.",
-                     SITEMAP_URL, EXPLORE_URL)
-        return []
-    from product_parser import sitemap_job_urls as _sm, listings_from_html as _lh
-    n_sitemap = len(_sm(sitemap_xml))
-    n_explore = len(_lh(explore_html))
-    logger.info("Enumerated %d job(s): %d from the sitemap, %d in the "
-                "/explore payload, %d in both. Neither source is a superset "
-                "of the other on this site.",
-                len(urls), n_sitemap, n_explore,
-                n_sitemap + n_explore - len(urls))
-    return urls
+    return enumerate_job_sources(
+        lambda url: _fetch_page_source(session, url),
+        scrub=_mask_credentials, attempts=args.retries,
+        pause=time.sleep)
 
 
 def _plan_page_urls(args, page_one_url: str,
@@ -1452,11 +1409,19 @@ def _fetch_pages_concurrently(args, pool, specs, concurrency: int):
                                                   page_num, url)
                         with results_lock:
                             results.append(outcome)
-                        if outcome.ok and not outcome.products:
+                        if (outcome.ok and not outcome.products
+                                and page_flow.a_page_without_rows_ends_the_run(args.mode)):
                             logger.info("[%s] page %d returned no rows — "
                                         "treating that as the end of the listing "
                                         "and stopping dispatch.", name, page_num)
                             exhausted.set()
+                        elif outcome.ok and not outcome.products:
+                            # An enumerated queue: this address is gone, the
+                            # next one is a different address.
+                            logger.info("[%s] page %d (%s) returned no rows "
+                                        "(%s) — continuing with the rest of "
+                                        "the queue.", name, page_num, url,
+                                        outcome.state or "empty")
                 finally:
                     session.close()
         except Exception:  # noqa: BLE001 — a dead worker must not hang the run
@@ -1515,6 +1480,10 @@ def scrape(args) -> int:
     # than inside the `with` block — an UnboundLocalError on the reporting
     # path would lose a run that had already done all its work.
     total_enumerated = 0
+    # How whole the enumeration was, or None when this mode enumerates
+    # nothing. Bound here for the same reason as `total_enumerated`: the
+    # reporting path runs after the browser is closed.
+    enumeration = None
 
     pool = proxy_pool_from_args(args)
     if pool and args.cdp_endpoint:
@@ -1546,14 +1515,7 @@ def scrape(args) -> int:
                            "each.")
             concurrency = 1
         elif not pool:
-            logger.warning("--concurrency %d with no proxy pool: every worker "
-                           "leaves from the SAME address, which is a faster way "
-                           "to get that address scored than to gather data. "
-                           "Mercor served every request measured on "
-                           "Cloudflare on EVERY route including robots.txt, "
-                           "so an address that works is one worth not "
-                           "burning. Pass --proxy-file to spread the load.",
-                           concurrency)
+            logger.warning(page_flow.CONCURRENCY_NO_POOL_WARNING, concurrency)
         if pool and pool.rotates_per_page():
             logger.info("--proxy-rotate per-page is redundant under "
                         "--concurrency: each worker already holds its own exit "
@@ -1576,7 +1538,8 @@ def scrape(args) -> int:
             # order is the other way round.
             job_urls: List[str] = []
             if args.mode == "job" and not _is_single_job_url(args):
-                job_urls = _enumerate_jobs(session, args)
+                enumeration = _enumerate_jobs(session, args)
+                job_urls = enumeration.urls
                 total_enumerated = len(job_urls)
                 if not job_urls:
                     # Nothing to fetch, so nothing is written — `save`
@@ -1681,12 +1644,21 @@ def scrape(args) -> int:
                         # further to fetch, and this is the honest terminating
                         # condition: a property of the DATA, not of a CSS
                         # selector that may have been renamed.
-                        if not fresh_count:
+                        if (not fresh_count
+                                and page_flow.a_page_without_rows_ends_the_run(args.mode)):
                             logger.info("Page %d added no rows not already seen "
                                         "— treating that as the end of the "
                                         "listing.", page_num)
                             stop_reason = "no_new_products"
                             break
+                        if not fresh_count:
+                            # --mode job: every page is an independent address,
+                            # so one adding nothing (a withdrawn listing, a
+                            # duplicate) says nothing about the next.
+                            logger.info("Page %d (%s) added no rows (%s) — "
+                                        "continuing with the rest of the "
+                                        "queue.", page_num, outcome.url,
+                                        outcome.state or "empty")
 
                         if page_num - 1 < len(planned):
                             url = planned[page_num - 1]
@@ -1771,11 +1743,7 @@ def scrape(args) -> int:
                         "structured data — which is why this scraper reads "
                         "the React Query payload instead.",
                         len(all_rows), indexed)
-        logger.info("--mode listings fetches everything /explore serves, and "
-                    "/explore is not everything Mercor publishes: 72 of the "
-                    "462 listings enumerated on 2026-09-18 appeared only in "
-                    "the sitemap, and all three of those checked were live. "
-                    "Use --mode job to cover them.")
+        logger.info(page_flow.LISTINGS_NOT_EXHAUSTIVE_NOTE)
 
     if args.mode == "job" and total_enumerated:
         done = len([o for o in outcomes if o.ok])
@@ -1785,8 +1753,8 @@ def scrape(args) -> int:
                     "" if done >= total_enumerated
                     else "  Pass --pages %d to cover the rest." % total_enumerated)
 
-    ok_pages = [o for o in outcomes if o.ok]
-    failed_pages = [o.page_num for o in outcomes if not o.ok]
+    ok_pages, failed_pages, unreadable_pages = page_flow.account_for_pages(
+        outcomes)
     final_url = (max(ok_pages, key=lambda o: o.page_num).final_url
                  if ok_pages else args.url)
 
@@ -1799,16 +1767,37 @@ def scrape(args) -> int:
     # of the file inheriting a number from a README that was measured on
     # some other day.
     extra = {"route_is_paginated": args.mode == "job", "mode": args.mode}
+    if unreadable_pages:
+        # Pages the site served and this parser could not read — by number,
+        # so the loss is a list a reader can act on rather than a count.
+        extra["pages_unreadable"] = unreadable_pages
     if args.mode == "listings":
         extra["records_in_payload"] = total_available
         extra["urls_in_itemlist"] = indexed
         extra["pages_available"] = pages_available
     elif args.mode == "job":
         extra["jobs_enumerated"] = total_enumerated or None
+        if enumeration is not None:
+            extra.update(enumeration.as_sidecar())
         extra["jobs_fetched"] = len(ok_pages)
+        # Addresses the site answered "gone" for. A withdrawn listing is an
+        # ordinary event here (the enumeration is built before any address
+        # is fetched), so it does not make the run partial — but it is
+        # recorded BY ADDRESS, because "complete" with fewer rows than
+        # `jobs_fetched` would otherwise read as rows lost without a trace.
+        gone = [o.url for o in sorted(outcomes, key=lambda o: o.page_num)
+                if o.ok and o.state == "not_found"]
+        extra["jobs_not_found"] = len(gone)
+        if gone:
+            extra["urls_not_found"] = gone
     if args.domain:
         extra["domain_filter"] = args.domain
 
+    # A run that fetched every address it was GIVEN is still short when the
+    # list it was given was a fallback — see page_flow.reconcile_stop_reason.
+    stop_reason = page_flow.reconcile_stop_reason(
+        stop_reason, None if enumeration is None else enumeration.complete,
+        unreadable_pages)
     return finish_run(all_rows, args.out, args.format, args.allow_empty,
                       blocked=blocked, stop_reason=stop_reason,
                       pages_requested=args.pages, pages_completed=len(ok_pages),
@@ -1839,29 +1828,15 @@ def parse_args():
                         "insensitively. This filters rows AFTER they are "
                         "fetched and is honest about it: Mercor's index "
                         "accepts no query parameters at all — ?domain= on "
-                        "/explore was measured returning the identical 390 "
-                        "records — so nothing here reduces what is "
+                        "/explore was measured returning a byte-identical "
+                        "payload (2026-09-18) — so nothing here reduces what is "
                         "downloaded. The 12 values Mercor publishes include "
                         "Finance, Software Engineering, Medicine, Law and "
                         "'Life, Physical, and Social Science'. --mode "
                         "listings and --mode job only; the careers route "
                         "publishes departments instead.")
     p.add_argument("--mode", choices=list(MODES), default=DEFAULT_MODE,
-                   help="listings (default): work.mercor.com/explore, the "
-                        "marketplace index. 390 contract roles in ONE "
-                        "response, with rates, domains, eligibility and slot "
-                        "counts; --pages does not apply, the route has no "
-                        "second page. job: one listing per page, enumerated "
-                        "from the sitemap and the index (462 jobs measured "
-                        "2026-09-18). Adds the company website, the company "
-                        "description, the spot counts and a currency, and is "
-                        "the only mode that covers the 72 listings the index "
-                        "does not show — use --pages to say how many, and "
-                        "--concurrency to fetch them in parallel. careers: "
-                        "www.mercor.com/careers, Mercor's OWN salaried "
-                        "openings via Ashby. A different population with its "
-                        "own id space, so diff_runs.py will not compare it "
-                        "against the other two.")
+                   help=page_flow.MODE_HELP)
     p.add_argument("--category", default=None,
                    help="Label to tag the run with in the sidecar. Defaults "
                         "to what the URL selects — 'explore', 'careers', or "
@@ -1895,10 +1870,7 @@ def parse_args():
     p.add_argument("--format", choices=["json", "csv", "both"], default="both")
     p.add_argument("--out", default="mercor_jobs", help="Output file prefix")
     p.add_argument("--locale", default="en-US",
-                   help="Browser locale (default en-US). It does NOT decide "
-                        "which route is read — that is --mode, or --url — so "
-                        "this only affects what the browser claims about "
-                        "itself.")
+                   help=page_flow.LOCALE_HELP)
     p.add_argument("--proxy", default=None,
                    help="Proxy URL, e.g. http://ACCOUNT:PASSWORD@HOST:9999 "
                         "(2captcha.com/proxy)")
@@ -1954,15 +1926,7 @@ def parse_args():
                         "captcha and reCAPTCHA.")
     p.add_argument("--solve-captcha", choices=["when-blocked", "always"],
                    default="when-blocked",
-                   help="when-blocked (default): only pay to solve a "
-                        "reCAPTCHA if the content is not already readable. "
-                        "always: solve whenever one is detected. Neither "
-                        "setting changes what Cloudflare does: a managed "
-                        "challenge is what a scored address gets on every "
-                        "route here, and a solve only helps once "
-                        "TURNSTILE_INTERCEPT_JS has captured its parameters. "
-                        "A residential exit removes the challenge entirely, "
-                        "which is why most runs never reach this path.")
+                   help=page_flow.SOLVE_CAPTCHA_HELP)
     p.add_argument("--min-score", type=float, default=0.7,
                    help="reCAPTCHA v3 minimum score to request (0.3, 0.7 or 0.9 "
                         "— the API only accepts these three). Ignored for v2 "
@@ -1993,6 +1957,9 @@ def parse_args():
     bad_number = page_flow.numeric_flag_error(args)
     if bad_number:
         p.error(bad_number)
+
+    if args.retries < 1:
+        p.error(page_flow.RETRIES_MUST_BE_POSITIVE)
 
     # Every mode has a correct default URL, so unlike the sibling repo this
     # engine was ported from there is nothing to refuse here and no pair of
@@ -2037,12 +2004,7 @@ def parse_args():
         # assumed — `?page=2`, `?limit=`, `?offset=` and `?domain=` on
         # /explore each returned a byte-identical payload of the same 390
         # records on 2026-09-18, so there is genuinely nothing to fetch.
-        logger.warning("--pages %d is ignored in --mode %s: the route holds "
-                       "its whole result set in ONE response and honours no "
-                       "pagination parameter. --mode job is the mode that "
-                       "pages — there a page is one job, and --pages 462 "
-                       "fetches every one Mercor publishes. The run status "
-                       "will say single_page_route.", args.pages, args.mode)
+        logger.warning(page_flow.PAGES_IGNORED_WARNING, args.pages, args.mode)
         args.pages = 1
 
     if args.category is None:

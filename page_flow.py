@@ -35,6 +35,7 @@ OPERATION instead, and each engine spells it in its own dialect.
 import logging
 from typing import Callable, Optional
 
+from output_writer import COMPLETE_STOP_REASONS
 from product_parser import (detect_bot_challenge,  # noqa: F401
                             detect_page_state, route_of)
 
@@ -311,6 +312,96 @@ def pagination_is_addressable(url: str) -> bool:
     return route_of(url or "") == "job"
 
 
+def a_page_without_rows_ends_the_run(mode: str) -> bool:
+    """Whether a served page that adds no new rows means "there is no more".
+
+    "This page added no new sku" is the terminating
+    condition for a LISTING, where pages are slices of ONE result and a page
+    that adds nothing means the slices have run out (or are looping back).
+
+    It is the WRONG condition for an enumerated queue, and `--mode job` is
+    one: every page is an independent address read from the sitemap, so one
+    page adding nothing says nothing about the next. Mercor makes that
+    routine rather than hypothetical, because the enumeration is built
+    before any of its addresses is fetched, so a listing withdrawn in
+    between is an ordinary event. Reproduced on the audited commit with
+    three queued addresses, the second a 404: ONE row, `status: complete`,
+    exit 0, `stop_reason: no_new_products`, the third address never fetched.
+
+    A 404 is the end of ONE URL, not of the list. This returns False for
+    `job`, and True for the modes that read slices of one result — which on
+    this site never reach a second page, so in practice it is a statement
+    of intent that keeps the next paginated mode from inheriting the bug.
+    """
+    return mode != "job"
+
+
+ENUMERATION_INCOMPLETE = "enumeration_incomplete"
+PARSER_FOUND_NOTHING = "parser_found_nothing"
+
+
+def account_for_pages(outcomes):
+    """(read, failed page numbers, unreadable page numbers) — one place.
+
+    Three engines each computed `ok` and `failed` inline, and "ok" meant "no
+    load failure and no block". That left a hole this closes: a page the
+    site SERVED but this parser could not read (`parse_error`) was `ok`,
+    counted as completed, and contributed nothing — so a run whose every
+    page was unreadable had `pages_completed == pages_requested`, no failed
+    pages, and `finish_run` took the zero rows for an empty catalogue
+    (exit 4). In `--mode job` the same page simply vanished from a run that
+    went on to report `complete`.
+
+    An unreadable page is a FAILED page, by number (which pages, not how many,
+    so the sidecar can say what is missing), so `finish_run` sees `not complete` and the
+    zero-row case becomes exit 5 — "nothing was gathered, nothing can be
+    concluded" — instead of exit 4's claim that the answer was nothing.
+    """
+    unreadable = sorted(o.page_num for o in outcomes
+                        if o.ok and o.state == "parse_error")
+    read = [o for o in outcomes if o.ok and o.state != "parse_error"]
+    failed = sorted({o.page_num for o in outcomes if not o.ok}
+                    | set(unreadable))
+    return read, failed, unreadable
+
+
+def reconcile_stop_reason(stop_reason: str,
+                          enumeration_complete: Optional[bool],
+                          unreadable_pages=()) -> str:
+    """Do not let a run that knowingly saw only part of the picture say "complete".
+
+    `enumeration_complete` is None outside `--mode job` (nothing was
+    enumerated), True when both sources answered, False when one did not.
+    `unreadable_pages` are pages the site served and the parser could not
+    read (see `account_for_pages`).
+
+    A run can fetch every address it was GIVEN and still be short, because
+    the list it was given was a fallback, or because some pages parsed to
+    nothing. Every stop reason the loop itself reaches (`completed`,
+    `page_cap_reached`, …) describes the loop, and says nothing about either
+    — so on its own it reads `complete` over rows from part of the catalogue.
+    This overrides only a stop reason that was about to be reported as
+    complete: a run that already failed for a worse reason (blocked, load
+    failure) keeps that one, because it is the more useful thing to tell the
+    caller.
+
+    Unreadable pages win over an incomplete enumeration when both hold,
+    because they name a defect in THIS code rather than a condition of the
+    site; the sidecar still carries the enumeration failure beside it.
+
+    Neither result is in COMPLETE_STOP_REASONS, so `finish_run` reports
+    `partial` (exit 6) with the rows kept — or exit 5 with none — and
+    `diff_runs.py`, which refuses a run that is not `complete`, will not
+    compare it as a full snapshot.
+    """
+    if stop_reason in COMPLETE_STOP_REASONS:
+        if unreadable_pages:
+            return PARSER_FOUND_NOTHING
+        if enumeration_complete is False:
+            return ENUMERATION_INCOMPLETE
+    return stop_reason
+
+
 def pages_to_plan(pages_requested: int, pages_available: Optional[int]) -> int:
     """How many pages a run may ask for, given what the enumeration holds.
 
@@ -356,3 +447,77 @@ def concurrency_for_mode(mode: str, concurrency: int) -> int:
     if mode in ("listings", "careers"):
         return 1
     return max(1, int(concurrency or 1))
+
+
+# ---------------------------------------------------------------------------
+# User-facing text that three engines must say identically
+# ---------------------------------------------------------------------------
+# These were three hand-copied strings that had drifted into three different
+# claims about the same flag, two of them inherited from other sites. One
+# definition here makes that impossible, and `smoke_test.py` fails if an
+# engine spells a flag's help any other way.
+#
+# Every sentence is about Mercor and was measured on 2026-09-18; none is
+# carried from the repo this one was copied from.
+
+SOLVE_CAPTCHA_HELP = (
+    "when-blocked (default): only pay to solve a captcha if the content is "
+    "not already readable. always: solve whenever one is detected. On this "
+    "site that difference is real money: work.mercor.com loads an invisible "
+    "reCAPTCHA Enterprise on every page and it has never blocked a fetch, so "
+    "`always` buys a solve on every marketplace page to clear nothing. "
+    "www.mercor.com (--mode careers) loads none. No challenge was served on "
+    "any route on 2026-09-18; the solver exists for the day that changes.")
+
+LOCALE_HELP = (
+    "Browser locale (default en-US). It changes what the browser claims "
+    "about itself and nothing about which listings are read: no route this "
+    "scraper reads carries a locale segment or a per-country host.")
+
+CONCURRENCY_NO_POOL_WARNING = (
+    "--concurrency %d with no proxy pool: every worker leaves from the SAME "
+    "address, which is N times the traffic from one place. Mercor served "
+    "every request measured on 2026-09-18 from a bare datacentre address, so "
+    "this is a courtesy to the site rather than a known risk to you. Pass "
+    "--proxy-file to spread the load.")
+
+RETRIES_MUST_BE_POSITIVE = (
+    "--retries counts ATTEMPTS per page load, not repeats after the first, "
+    "so it must be at least 1. With 0 the load loop never runs: nothing is "
+    "fetched, the empty document the browser starts with is read, and the "
+    "run then waits out its full readiness timeout and reports exit 4 — "
+    "'this listing is empty' — for a page it never requested.")
+
+# NO LIVE COUNT in any of the three below, on purpose (a number
+# describing a living thing is paired with the command that produces it, or
+# left out). They used to say "390 contract roles", "462 jobs" and "the 72
+# listings the index does not show" — figures from 2026-09-18 that read as
+# current, and by 2026-10-07 were 305, 306 and 1. The run itself measures
+# them (sidecar: `records_in_payload`, `enumeration_sources`), and
+# `smoke_test.py` fails on a count creeping back into a user-visible string.
+
+MODE_HELP = (
+    "listings (default): work.mercor.com/explore, the marketplace index, the "
+    "whole of it in ONE response, with rates, domains, eligibility and slot "
+    "counts; --pages does not apply, the route has no second page. job: one "
+    "listing per page, enumerated from the sitemap AND the index, adding the "
+    "company website, the company description, the spot counts and a "
+    "currency; the only mode that reads listings the index does not show. "
+    "--pages says how many (capped at what the enumeration holds) and "
+    "--concurrency fetches them in parallel (Playwright only). careers: "
+    "www.mercor.com/careers, Mercor's OWN salaried openings via Ashby — a "
+    "different population with its own id space, so diff_runs.py will not "
+    "compare it against the other two.")
+
+LISTINGS_NOT_EXHAUSTIVE_NOTE = (
+    "--mode listings fetches everything /explore serves, and /explore is not "
+    "guaranteed to be everything Mercor publishes. How much it omits changes "
+    "from day to day — large on 2026-09-18, almost nothing on 2026-10-07 — so "
+    "--mode job, which reads the sitemap as well and records the size of the "
+    "union in the sidecar (enumeration_sources), is how to find out.")
+
+PAGES_IGNORED_WARNING = (
+    "--pages %d is ignored in --mode %s: the route holds its whole result "
+    "set in ONE response and honours no pagination parameter. --mode job is "
+    "the mode that pages — there a page is one job, and --pages is capped at "
+    "what the enumeration holds. The run status will say single_page_route.")

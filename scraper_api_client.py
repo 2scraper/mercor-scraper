@@ -48,7 +48,6 @@ from product_parser import (BOT_CHALLENGE_MARKERS, MODES, DEFAULT_MODE,
                             detect_bot_challenge, detect_page_state,
                             parse_page, parse_detail, is_supported_url,
                             mode_for_url, EXPLORE_URL, CAREERS_URL)
-from output_writer import save
 import env_config
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
@@ -69,7 +68,8 @@ MAX_API_TIMEOUT = 120
 # Imported rather than redefined: the browser engines return the same code for
 # a Scraping Browser that will not accept a connection, and two definitions
 # of one exit code is how a family's contract drifts.
-from output_writer import EXIT_API_ERROR  # noqa: E402
+from output_writer import (EXIT_API_ERROR, SOURCE_DEFAULT,  # noqa: E402
+                           finish_run)
 
 def _mask_credentials(url: str) -> str:
     """Never print a username:password embedded in a ws://... or http://... URL."""
@@ -242,7 +242,13 @@ def _run_once(args, attempt: int = 1, attempts: int = 1) -> int:
 
     # Same policy as the browser engines: the status decides the blocked
     # case, because this site's refusal has no marker to detect.
-    state = detect_page_state(html, status=upstream_status, url=args.url)
+    # `mode=` matters: without it the page is judged as a LISTING whatever
+    # was asked for, so a perfectly good detail page — which holds no
+    # `listings` — reads as a page whose records went missing. The browser
+    # engines pass it; this client did not, the same omission the mirror
+    # engines had.
+    state = detect_page_state(html, status=upstream_status, url=args.url,
+                              mode=args.mode)
     if state == "blocked":
         dump = f"{args.out}_scraperapi_debug.html"
         with open(dump, "w", encoding="utf-8") as f:
@@ -297,9 +303,35 @@ def _run_once(args, attempt: int = 1, attempts: int = 1) -> int:
             f.write(html)
         logger.warning("0 jobs parsed — saved the raw response to %s so "
                        "you can see what actually came back.", dump)
+        if state == "parse_error":
+            # Served, and this parser could not find where the records would
+            # be (or the page contradicts itself). That is NOT "the listing
+            # is empty": exit 4 would tell a pipeline the site had nothing,
+            # when nothing can be concluded about the site from this run. It
+            # is exit 5, the same number the browser engines give it.
+            logger.error("The page was served but the reader could not find "
+                         "the records in it — exit %d, NOT an empty result "
+                         "(exit 4). The saved response shows what changed.",
+                         EXIT_API_ERROR)
+            return EXIT_API_ERROR
         return 4
 
-    return save(products, args.out, args.format, allow_empty=args.allow_empty)
+    # Through `finish_run`, not a bare `save`. This client used to write rows
+    # and NO sidecar, which was true and defensible while nothing depended on
+    # one — and then `diff_runs.py` needed to REQUIRE one, because a run whose
+    # completeness cannot be verified cannot be told from a partial one, and
+    # the family refuses to diff those. The requirement could not be made
+    # until this client wrote what it requires, or every diff of its output
+    # would have been refused for a reason that is the client's, not the
+    # user's.
+    return finish_run(products, args.out, args.format, args.allow_empty,
+                      blocked=False,
+                      stop_reason=("single_page_route"
+                                   if args.mode in ("listings", "careers")
+                                   else "completed"),
+                      pages_requested=1, pages_completed=1,
+                      mode=args.mode, source=SOURCE_DEFAULT,
+                      start_url=args.url, final_url=args.url)
 
 
 def parse_args():

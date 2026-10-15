@@ -30,6 +30,11 @@ Measured 2026-09-18 from a Hetzner VPS in Helsinki (AS24940):
 | `www.mercor.com/careers` | 200 — **108 roles** |
 | `work.mercor.com/sitemap.xml` | 200 — **447 job URLs** |
 
+Re-run on 2026-10-07 from the same Hetzner address, through all three
+engines: `--mode listings` 305 rows, `--mode careers` 113, `--mode job` 3 and
+then 8 (four workers) of 306 enumerated — every one served, exit 0. (The
+catalogue is smaller than three weeks earlier; the access is not different.)
+
 …to `curl`, to `python-requests`, and to a request with an **empty**
 User-Agent. Eighteen candidate bot-challenge markers were counted across
 seven captures — `cf-turnstile`, `challenges.cloudflare.com`, DataDome,
@@ -54,17 +59,19 @@ in [What the 2Captcha products are for](#what-the-2captcha-products-are-for)
 ## Quick start
 
 ```bash
-# The marketplace index — 390 contract roles in one response
+# The marketplace index — the whole of it, in one response
 python3 playwright_scraper.py --mode listings --format both --out mercor
 
 # Mercor's own salaried openings (a different host, a different population)
 python3 playwright_scraper.py --mode careers
 
 # Every listing's detail page. A "page" here is one job, enumerated from the
-# sitemap AND the index — 462 of them on 2026-09-18.
+# sitemap AND the index; --pages is capped at what that enumeration holds, so
+# a large number means "all of them" (462 of them on 2026-09-18, 306 on
+# 2026-10-07 — the size moves, which is why the sidecar records it).
 # (--concurrency is Playwright-only; the other two engines log that they
 #  ignore it and fetch one page at a time.)
-python3 playwright_scraper.py --mode job --pages 462 --concurrency 4
+python3 playwright_scraper.py --mode job --pages 1000 --concurrency 4
 
 # One specific listing
 python3 playwright_scraper.py --mode job \
@@ -98,26 +105,44 @@ added and removed.
 Read this section before concluding the tool is broken.
 
 **Most listings do not name a company, and that is the site.** 99 of 390
-name one; the other 291 are clients Mercor runs the hiring for without
-naming them. `company_brand_visible` is the site's own flag saying which is
+named one on 2026-09-18 and 65 of 305 on 2026-10-07; the rest are clients
+Mercor runs the hiring for without naming them. `company_brand_visible` is the site's own flag saying which is
 which, so a null `company_name` beside `False` is *withheld*, not missing.
 
-**`/explore` is complete and is not exhaustive.** A `--mode listings` run
-fetches everything that route serves — genuinely `status: complete` — and
-the route held **390 of the 462** listings the site publishes. Neither
-enumeration source contains the other:
+**`/explore` is complete and is not exhaustive — and how far it falls short
+moves.** A `--mode listings` run fetches everything that route serves,
+genuinely `status: complete`, and the route does not always hold everything
+the site publishes. Neither enumeration source contains the other, on either
+date it was measured:
 
 ```
-sitemap.xml   447 job URLs
-/explore      390 records
-shared        375
-sitemap only   72   ← all three checked were live, status "active"
-explore only   15
-union         462
+                      2026-09-18    2026-10-07
+sitemap.xml job URLs      447           304
+/explore records          390           305
+shared                    375           303
+sitemap only               72             1   (the 72 checked were all live)
+explore only               15             2
+union                     462           306
 ```
 
-Use `--mode job` to cover the 72. The sidecar records both figures so a
-consumer never has to infer one from the other.
+The structural claim held both days; the SIZE of the gap did not (72 → 1).
+So no figure here is a fact about the site, and the answer is a command, not
+a number: `--mode job` reads both sources every run and records the result in
+the sidecar (`enumeration_sources`), together with whether both answered
+(`enumeration_complete`).
+
+**A lost source makes the run `partial`, not `complete`.** If the sitemap
+cannot be read — it raised, or it answered and held no job URLs — the run
+carries on with the index alone, keeps the rows, and reports `partial` (exit
+6, stop reason `enumeration_incomplete`) with the failure named in
+`enumeration_failures`. Each source is tried `--retries` times first, so one
+dropped connection does not cost a run its status.
+
+**A withdrawn listing is not the end of the queue.** In `--mode job` the
+addresses are enumerated before any of them is fetched, so a listing taken
+down in between answers 404 (or bounces to `/login`). That one address is
+recorded in `urls_not_found`; the rest are still fetched, and the run stays
+`complete`.
 
 **The index has no second page.** `?page=2`, `?limit=10`, `?offset=100` and
 `?domain=Finance` each returned a byte-identical payload. `--pages` above 1
@@ -125,8 +150,8 @@ is ignored in `--mode listings` and `--mode careers`, with a log line
 saying so. `--mode job` is the mode that paginates, and there a page is one
 job.
 
-**Rates are not all hourly.** Across the 390: `hourly` 347, `per-task` 31,
-`one-time` 9, `yearly` 3. Read `rate_period` before doing arithmetic on
+**Rates are not all hourly.** `hourly` 347 / `per-task` 31 / `one-time` 9 /
+`yearly` 3 of 390 on 2026-09-18; 267 / 27 / 8 / 3 of 305 on 2026-10-07. Read `rate_period` before doing arithmetic on
 `rate_min`/`rate_max` — and note `commitment` is a *different* axis (how
 much time is asked for: hourly 228, part-time 104, task-based 35, full-time
 23). A task-based commitment can still be paid an hourly rate, and 31 are.
@@ -138,10 +163,19 @@ fills it. The careers route publishes USD *and* GBP, so nothing is assumed
 there either.
 
 **The site's own JSON-LD is incomplete — do not use it.** `/explore` ships
-an `ItemList` of 326 URLs beside a React Query cache of 390 full records.
-The 64 it omits are all 55 `evergreen` listings plus 9 standard. This
-scraper reads the cache; a parser anchored on the JSON-LD would silently
-lose 16% of the catalogue.
+an `ItemList` beside a React Query cache of full records, and the `ItemList`
+is always the smaller view: 326 against 390 on 2026-09-18, 237 against 305 on
+2026-10-07. What it omits is every `evergreen` listing plus a few standard
+ones (55 + 9 then, 60 + 8 now). This scraper reads the cache; a parser
+anchored on the JSON-LD would silently lose about a fifth of the catalogue.
+A response whose cache is EMPTY beside an `ItemList` that lists jobs is
+treated as a parse failure, not an empty index.
+
+**Zero is not always missing.** On the careers route, "Mercor AI Safety Fund
+Grants" states `$0` and means it (a grant programme); two other roles
+withhold their pay. The site's own `shouldDisplayCompensationOnJobPostings`
+flag tells them apart: a stated zero is written through as `0.0`, a withheld
+figure is `null`, and `compensation` keeps the site's string either way.
 
 **Hydration rewrites every job link.** The served markup has
 `href="/jobs/list_…"`; the live DOM has `href="/explore?listingId=…"`. It
@@ -174,8 +208,17 @@ company website, the company description and a currency. Checked field by
 field on the same job: **zero disagreements** on the 37 columns both
 publish.
 
-**Exit codes:** `0` ok · `1` crash · `2` bad usage · `3` blocked · `4` zero
-rows · `5` remote API error · `6` partial.
+**Exit codes:** `0` ok · `1` crash · `2` bad usage · `3` blocked · `4` the
+site answered and the answer was empty · `5` the content was never obtained
+or could not be read — a dead proxy, a timeout, a page whose shape the parser
+no longer recognises · `6` partial (rows kept, something missing).
+
+`4` and `5` are different claims and a pipeline should branch on them. A
+page that was SERVED but in which the parser cannot find where the records
+would be (a renamed key, say) is `5` with stop reason `parser_found_nothing`
+and the page named in `pages_unreadable` — never `4`, which would tell you
+the site had nothing. `--retries` counts attempts, so `--retries 0` is a
+usage error (exit 2).
 
 A run that finds nothing **writes nothing** — last night's good output is
 never replaced with `[]`. `--allow-empty` opts out.
@@ -231,8 +274,8 @@ exit.
 Four separately-billed products behind one key. On this site none of them
 is required, and saying what each actually buys is more useful than a pitch:
 
-- **Proxies** — not for access. For *volume*: `--mode job` can fetch 462
-  detail pages, and spreading those across exits is politer than sending
+- **Proxies** — not for access. For *volume*: `--mode job` can fetch every
+  detail page the enumeration holds (hundreds), and spreading those across exits is politer than sending
   them all from one address. `--concurrency N` without a pool sends N× the
   traffic from a single IP, and the engines warn about it.
 - **Scraping Browser API** — a specific exit **country**, and no local
@@ -274,7 +317,7 @@ Three things about it matter:
    across seven captures returns zero for every reCAPTCHA spelling.
 2. **It never blocks.** No `bframe` (challenge) iframe was rendered on any
    route, on any run: it scores the session in the background and Mercor
-   served all 390 rows alongside it. So it must never be paid for on a page
+   served every row alongside it (390 on 2026-09-18, 305 on 2026-10-07). So it must never be paid for on a page
    that already has content — which is what `--solve-captcha when-blocked`
    (the default) enforces.
 3. **The variant is inferred, not confirmed.** `size=invisible` with no
@@ -331,9 +374,24 @@ variable is ignored for that run; a typed `--url` that disagrees with
 python3 diff_runs.py --old monday.json --new tuesday.json
 ```
 
-Joins on `sku`. It **refuses** to compare runs that are not both `complete`,
-that were taken in different modes, or that come from different populations
-— a partial run's un-fetched pages would otherwise read as delisted jobs.
+Joins on `sku`. It **refuses** to compare runs that
+
+- are not both `complete` — a partial run's un-fetched pages would otherwise
+  read as delisted jobs;
+- have no `.meta.json` beside them, because completeness cannot then be
+  checked (`--force` overrides, for output you know is whole);
+- selected different things: another `--mode`, another `--domain`, another
+  start URL. Two complete runs under different filters are two slices of the
+  index, and every difference between them would be the filter;
+- come from different populations (careers against the marketplace share no
+  ids at all).
+
+When a `--mode job` run fetched fewer jobs than it enumerated, the headline
+says listings *entered* or *left the slice* rather than were added or
+removed — `--pages` and the sitemap order decide what a slice holds, so a
+listing missing from it has not been shown to be gone — and `--fail-on-change`
+ignores that movement. A real change to a listing both runs hold still fails
+it.
 
 A price difference that comes with a `data_source` difference is reported as
 `source_changed` rather than `changed`: that says something about our two

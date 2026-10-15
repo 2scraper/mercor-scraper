@@ -11,8 +11,27 @@ it from a bill or from a diff.
 
 ## [Unreleased]
 
-> **Behaviour changes in this section.** `--pages`/`--concurrency` below 1
-> and a negative `--delay`, `--retry-delay` or `--proxy-block-retries` are
+## [0.1.1] — 2026-10-07
+
+> **Behaviour changes for an existing user — read these before upgrading.**
+>
+> - **A page the site served and the parser could not read is exit 5, not
+>   exit 4.** Exit 4 says the site answered and the answer was empty; for a
+>   renamed key that was false. A genuinely empty index is still 4.
+> - **A run that could not read one of its two enumeration sources is
+>   `partial` (exit 6), no longer `complete`.** The rows are kept. Each
+>   source is tried `--retries` times first.
+> - **`--retries 0` is a usage error (exit 2).** It used to skip navigation
+>   altogether, wait 45 s and report exit 4.
+> - **`diff_runs.py` refuses more**: a run with no `.meta.json`, and two runs
+>   that selected different things (`--mode`, `--domain`, start URL). Both
+>   are `--force`-able. `scraper_api_client.py` now writes the sidecar this
+>   requires.
+> - **`--solve-captcha always` would pay for a solve on every marketplace
+>   page** — see the correction below. The default does not.
+>
+> **Also changed in this release (2026-10-15).** `--pages`/`--concurrency`
+> below 1 and a negative `--delay`, `--retry-delay` or `--proxy-block-retries` are
 > now usage errors (exit 2) in every engine. A `MERCOR_URL` from `.env` that
 > names a different route from the `--mode` you type is now ignored for that
 > run instead of exiting 2, and `.env.example` ships it commented out. CSV
@@ -20,6 +39,18 @@ it from a bill or from a diff.
 > leading apostrophe (CSV only; JSON is unchanged; the sidecar records
 > `csv_cells_escaped`). Output files are replaced atomically and keep their
 > mode.
+>
+> **A correction to what 0.1.0 said, which stays below as written.** 0.1.0
+> claimed "Mercor runs reCAPTCHA v3 Enterprise on every page". Measured in a
+> live browser afterwards: invisible reCAPTCHA **Enterprise** on
+> `work.mercor.com` only (index, detail pages and its 404s); `www.mercor.com`
+> and `/careers` load none, so `--mode careers` meets no captcha at all. And
+> "v3" is an inference — invisible with no challenge frame reads as v3, but an
+> unchallenging v2-invisible looks identical. Nothing depends on the variant
+> here because no solve is attempted.
+
+Found by a third-party audit of 0.1.0 (taken at `ceeb142`), every claim of
+which was reproduced before it was worked, plus what running the fixes found.
 
 ### Fixed (2026-10-15)
 
@@ -65,11 +96,71 @@ it from a bill or from a diff.
   salary (that is the employer's choice); it now requires every published
   salary figure to be parsed into a rate.
 
-Text and data copied from sibling repos when this one was bootstrapped,
-describing those sites as if they were this one.
 
 ### Fixed
 
+- **A withdrawn listing ended the whole `--mode job` queue.** Three enumerated
+  addresses, the second a 404, gave ONE row, `status: complete`, exit 0,
+  `stop_reason: no_new_products`, the third never fetched. "This page added
+  no new sku" is the end-of-listing signal for slices of one result and wrong
+  for independent addresses — and it was any empty page, not only a 404, in
+  the sequential loop AND in the concurrent worker. Decided once in
+  `page_flow.a_page_without_rows_ends_the_run`; withdrawn addresses are now
+  recorded in the sidecar (`urls_not_found`, `jobs_not_found`).
+- **A lost enumeration source was a log line.** Sitemap raising, 7 index
+  records, 100 pages asked for → 7 rows, `complete`, exit 0. The list now
+  travels with its provenance (`EnumerationResult`), a source fails if it
+  raised OR answered and held nothing, exception text is scrubbed before it
+  is stored, and the run is `partial` with `enumeration_failures` in the
+  sidecar. The logic exists once in `product_parser`, not three times.
+- **A renamed key read as an empty index.** `listings` → `listingsV2` gave
+  `empty`, zero rows. The container's presence is now asked separately from
+  its length, and a response that contradicts itself (an empty payload beside
+  a JSON-LD listing jobs) is a parse failure. Fixing the label was not
+  enough: an unreadable page was `ok` to the engine, so the run still ended
+  complete with no rows and exit 4. Unreadable pages are now failed pages
+  by number (`pages_unreadable`).
+- **Selenium and pyppeteer crashed with `AttributeError` when a retryable page
+  state met no `--proxy`** (`mask(pool.current)` on `None`); pyppeteer's
+  load-failure rotation crashed on ANY repeated load failure without a
+  proxy. Found by pointing a real browser at an unreadable page, the first
+  time that state was reachable. Guarded by an AST check over every use.
+- **`diff_runs.py` ignored the selection it was comparing.** `domain_filter`
+  was written to the sidecar and never read back, so two complete runs under
+  `--domain Finance` and `--domain Software Engineering` diffed as 2 added,
+  2 removed. A run with no sidecar passed as "nothing to check". A
+  `--mode job` run that fetched fewer jobs than it enumerated reported
+  "removed" for listings that were merely outside its slice; it now says
+  they left the slice, and `--fail-on-change` ignores that movement.
+- `--retries 0` (above), and three `--help` strings stating another site's
+  facts as this one's: `--locale` named `find_country`, `--solve-captcha`
+  claimed "a scored address gets a managed challenge on every route here"
+  (false, and contradicting the README) and said three different things in
+  three engines. The texts live once in `page_flow` now.
+- **User-visible strings stated live counts as current** ("390 contract
+  roles", "72 of the 462 listings", `--pages 462`). Removed; a guard fails
+  on one coming back.
+- `scraper_api_client.py` classified every page as a listing (it never passed
+  `mode`), and answered exit 4 for a page it could not read.
+- **The HTTP status never reached the classifier**, so a withdrawn listing
+  read as `empty`. There is no body to fall back on — the live 404 carries
+  `__NEXT_DATA__`, its visible text is empty, and "404" appears *more* on
+  good pages (7 and 17) than on the 404s (1 and 2). Playwright and pyppeteer
+  bind `goto()`'s response; Selenium reads Chrome's performance log; the
+  cross-engine fallback is that Mercor bounces a dead address to `/login`.
+- **The mirror engines never told the classifier which mode they were in.**
+- **A stated `$0` was banned along with a withheld salary.** "Mercor AI Safety
+  Fund Grants" prints `$0` and means it; two roles withhold their pay. Told
+  apart by the site's own `shouldDisplayCompensationOnJobPostings` flag,
+  which the parser now obeys rather than merely coincides with. Found by the
+  canary on its first dispatch.
+- The `engine-smoke` CI job grepped for a phrase the suite never prints, so
+  it could not fail. It also gained a check that the suite ran to completion.
+- `diff_runs.TRACKED_FIELDS` named 25 fields of which this row class had four,
+  so a rate going 100 → 999 diffed as "0 changed". Now this site's 23, pinned
+  against the dataclass.
+- `--concurrency` works in the Playwright engine only; that is now stated in
+  the README and pinned in both directions.
 - **`diff_runs.py` never reported `source_changed`.** Its one-source column
   list named another site's fields (`equity_min`, `company_badges`, ...),
   none of which `JobPosting` has, so the same listing read from the index
@@ -117,6 +208,39 @@ describing those sites as if they were this one.
 
 - `SECURITY.md` said this project has no releases or version tags; it has
   both. "Supported versions" now names the latest release and `main`.
+
+### Measured on 2026-10-07, from the same Hetzner address (AS24940, Helsinki)
+
+All three engines served all three modes, exit 0: `--mode listings` 305 rows,
+`--mode careers` 113, `--mode job` 3 and, with four workers, 8 of 306
+enumerated. A real dead address planted in the middle of a real enumeration:
+3 rows from 4 addresses on all three engines (it was 1), the dead one recorded
+by address, the run `complete`. A simulated lost sitemap: all three engines
+`partial`, exit 6, identical sidecars. A simulated renamed key: all three
+exit 5, nothing written.
+
+The catalogue moved. `/explore` held 305 records (390 on 2026-09-18), the
+sitemap 304 (447), shared 303 (375), union 306 (462). The structural claims
+held — neither source contains the other, and the JSON-LD `ItemList` is
+always the smaller view, omitting every `evergreen` listing (55 + 9 then,
+60 + 8 now). The SIZE of the sitemap-only gap did not: 72 → 1. No count in
+this project's messages is a fact about the site; the sidecar carries the
+run's own.
+
+### Notes for anyone extending this
+
+- **A guard written to watch a call can be blinded by moving the text out of
+  the call.** The donor-words check first walked only calls that produce text;
+  a control planted the word into a shared constant and stayed green. It now
+  reads every non-docstring string constant (2,130 measured, 0 hits).
+- **A control that stays green is a finding.** Two did here, and both were the
+  suite's: a check gated on importing an engine skips for exactly the engine
+  whose driver is absent from that venv, so a mirror's control must run in
+  the mirror's own venv.
+- **A fixture invented by hand will pass the check written against it.**
+  `NOT_FOUND_HTML` carried `<h1>404</h1><p>Page not found</p>`, which this
+  site has never served; the real 404 has no visible text at all. Replaced
+  with the real capture, scrubbed of its Sentry ids, nonce and key.
 
 ## [0.1.0] — 2026-09-18
 
@@ -171,18 +295,12 @@ this run. The ones that shaped the design:
   `?domain=` each returned a byte-identical payload, so `page_url()` returns
   None by design rather than manufacturing an address the site does not
   honour.
-- **The marketplace host runs invisible reCAPTCHA Enterprise; the corporate
-  host runs none.** `work.mercor.com` loads `enterprise.js` and an anchor
-  iframe (`size=invisible`, sitekey
-  `6LcUUCgsAAAAAD_LMM5QDj1qUwsfKYDbNKa0v5wO`) on the index, on detail pages
-  and on its 404s; `www.mercor.com` and `/careers` load zero captcha
-  requests and zero iframes. Its sitekey is in no served HTML and in none of
-  the eagerly-loaded JS bundles, so a static grep for the site's own captcha
-  config finds nothing — only a real browser reveals it. No challenge frame
-  was rendered on any route on any run, so it never blocks and must never be
-  paid for, which `--solve-captcha when-blocked` (the default) enforces. The
-  variant is inferred rather than confirmed: invisible with no challenge
-  frame reads as v3, but an unchallenging v2-invisible looks identical.
+- **Mercor runs reCAPTCHA v3 Enterprise on every page** — invisible, found
+  through `___grecaptcha_cfg` at runtime. Its sitekey is in no served HTML
+  and in none of the eagerly-loaded JS bundles, so a static grep for the
+  site's own captcha config finds nothing; only a real browser reveals it.
+  It never renders a challenge and must never be paid for, which
+  `--solve-captcha when-blocked` (the default) enforces.
 - **Pay is not all hourly**: `hourly` 347, `per-task` 31, `one-time` 9,
   `yearly` 3 across the 390. And `commitment` is a different axis from
   `rate_period` — a task-based commitment can still be paid hourly, and 31
@@ -217,22 +335,6 @@ Four traps cost real time here and are pinned by tests so they stay fixed:
   same Next.js app and references `/_next/static` *more* than a real page
   does. `detect_page_state` leads with the presence of `__NEXT_DATA__`
   instead, which the 404 carries none of.
-- **The HTTP status must reach the classifier, and here it is nearly the
-  only signal.** All three engines discarded what the navigation returned,
-  so a withdrawn listing classified as `empty` — a claim that the site
-  served an answer with nothing in it, about a job that is simply gone.
-  `--mode job` meets this routinely: the enumeration is built before any of
-  its 462 addresses is fetched. There is no body to fall back on — the live
-  404 carries `__NEXT_DATA__` like any other page, its visible text is the
-  empty string, and "404" appears *more* on good pages (7 and 17) than on
-  the 404s (1 and 2). Playwright and pyppeteer now bind `goto()`'s response;
-  Selenium reads Chrome's performance log, because `driver.get()` returns
-  None and WebDriver exposes no status at all. The cross-engine fallback is
-  that Mercor bounces a dead address to `/login?redirect=…`, which is
-  readable from the final URL alone.
-- **The mirrors never told the classifier which mode they were in**, so a
-  `--mode job` detail page was judged as if it were a listing. It worked by
-  luck, because `empty` still parses.
 - **`diff_runs.TRACKED_FIELDS` must name columns that exist.** Ported
   verbatim it named 25 fields of which this row class has four, so the diff
   compared nothing: a listing whose rate went 100 → 999 with its status
@@ -244,5 +346,6 @@ Four traps cost real time here and are pinned by tests so they stay fixed:
   twice; the first was a supermarket scraper whose price diff tracked a
   blogging platform's "claps".
 
-[Unreleased]: https://github.com/2scraper/mercor-scraper/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/2scraper/mercor-scraper/compare/v0.1.1...HEAD
+[0.1.1]: https://github.com/2scraper/mercor-scraper/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/2scraper/mercor-scraper/releases/tag/v0.1.0

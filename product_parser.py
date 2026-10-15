@@ -625,6 +625,122 @@ def enumerate_job_urls(sitemap_xml: Optional[str] = None,
     return out
 
 
+@dataclass
+class EnumerationResult:
+    """Which job addresses a run could see, and how far to trust that list.
+
+    `enumerate_job_urls` used to return a bare list, and that was the defect:
+    when the sitemap could not be read the run carried on with the index
+    alone — a source this module's own docstring documents as missing 72 of
+    462 live listings — and the sidecar then reported the fallback's size as
+    `jobs_enumerated`, as if it were the union. Reproduced on the audited
+    commit: sitemap raising, 7 index records, 100 pages asked for → 7 rows,
+    `status: complete`, exit 0. The warning went to a log nobody reads once
+    the run exits 0; nothing in the output said the catalogue was short.
+
+    So the list travels WITH its provenance. `complete` is the only question
+    a caller needs ("is this the union, or a fallback?"), `failures` says
+    which source and why, and the counts say how much each contributed so a
+    reader can see the size of what a failed source would have added.
+    """
+
+    urls: List[str] = field(default_factory=list)
+    sitemap_urls: int = 0
+    explore_records: int = 0
+    failures: List[str] = field(default_factory=list)
+
+    @property
+    def complete(self) -> bool:
+        return not self.failures
+
+    def as_sidecar(self) -> Dict[str, Any]:
+        out: Dict[str, Any] = {
+            "enumeration_complete": self.complete,
+            "enumeration_sources": {"sitemap_urls": self.sitemap_urls,
+                                    "explore_records": self.explore_records,
+                                    "union": len(self.urls)},
+        }
+        if self.failures:
+            out["enumeration_failures"] = list(self.failures)
+        return out
+
+
+def enumerate_job_sources(fetch_source, scrub=lambda text: text,
+                          attempts: int = 1, pause=lambda seconds: None
+                          ) -> EnumerationResult:
+    """Read both enumeration sources, and say which of them failed.
+
+    `fetch_source(url)` returns the serialised document and may raise. It is
+    supplied by the ENGINE, so both reads leave from the exit the pages will
+    (see `product_parser`'s module docstring on why that matters).
+
+    A source counts as failed in TWO ways, and the second is the quiet one:
+    it raised, OR it answered and held nothing. A sitemap that loads but
+    carries no `<loc>` — served an error shell, or restructured — is
+    indistinguishable from "the site has no jobs" unless the caller asks, and
+    a live marketplace does not have zero. Both sources hold hundreds of
+    entries (447 and 390 on 2026-09-18), so an empty one is a failure to read
+    rather than a fact about the catalogue.
+
+    Each source gets `attempts` tries (the engines pass `--retries`, with
+    `--retry-delay` as `pause`) before it is declared failed. That is not a
+    nicety: now that a lost source is reported loudly — a `partial` run, exit
+    6 — a single dropped connection would otherwise cost the run its status.
+    It was found live: a navigation still in flight aborted the NEXT read
+    with `net::ERR_ABORTED`, on a source that was perfectly healthy.
+
+    `scrub` is applied to every exception message before it is stored or
+    logged. An exception message ends up in logs and the sidecar, and one raised
+    through a proxy can carry its credentials — the sidecar is a file that
+    gets shared.
+    """
+    result = EnumerationResult()
+    texts: Dict[str, str] = {}
+    counts = {"sitemap": sitemap_job_urls, "explore": listings_from_html}
+    for name, url in (("sitemap", SITEMAP_URL), ("explore", EXPLORE_URL)):
+        text, why = "", ""
+        for attempt in range(1, max(1, int(attempts)) + 1):
+            try:
+                text = fetch_source(url) or ""
+                why = ("" if counts[name](text)
+                       else "answered but held no job URLs")
+            except Exception as exc:  # noqa: BLE001 - any driver error is the same
+                text = ""
+                why = "%s: %s" % (type(exc).__name__, scrub(str(exc))[:200])
+            if not why:
+                break
+            if attempt < attempts:
+                log.info("%s read failed (%s); attempt %d of %d, trying again.",
+                         name, why, attempt, attempts)
+                pause(min(2.0 * attempt, 10.0))
+        texts[name] = text
+        if why:
+            result.failures.append(
+                "%s: %s%s" % (name, why,
+                              " (after %d attempts)" % attempts
+                              if attempts > 1 else ""))
+    result.sitemap_urls = len(sitemap_job_urls(texts["sitemap"]))
+    result.explore_records = len(listings_from_html(texts["explore"]))
+    result.urls = enumerate_job_urls(texts["sitemap"], texts["explore"])
+
+    if result.failures:
+        log.warning(
+            "The job enumeration is INCOMPLETE (%s). Neither source "
+            "contains the other — on 2026-09-18 the sitemap held 447, the "
+            "index 390, they shared 375 and the union was 462 — so this run "
+            "has %d address(es) and is short by whatever the failed source "
+            "would have added. It will be reported as partial.",
+            "; ".join(result.failures), len(result.urls))
+    elif result.urls:
+        log.info("Enumerated %d job(s): %d from the sitemap, %d in the "
+                 "/explore payload, %d in both. Neither source is a "
+                 "superset of the other on this site.", len(result.urls),
+                 result.sitemap_urls, result.explore_records,
+                 result.sitemap_urls + result.explore_records
+                 - len(result.urls))
+    return result
+
+
 def _slug_for(record: Dict[str, Any]) -> Optional[str]:
     """Rebuild the URL slug Mercor uses, from the title.
 
@@ -1438,6 +1554,44 @@ def bounced_to_login(url: str) -> bool:
     return bool(_LOGIN_BOUNCE_RE.match(path))
 
 
+def expected_container_present(payload: Any, mode: str) -> bool:
+    """Whether the payload holds the PLACE the records would be, empty or not.
+
+    `listings_from_next_data` returns [] both for a genuinely empty index and
+    for a payload whose key was renamed, because it looks the key up and
+    shrugs when it is missing. Those are different facts and want different
+    answers: the first is the site saying "nothing here" (exit 4), the second
+    is this parser failing to read a page the site served. Renaming
+    `listings` to `listingsV2` in a real capture reproduced it on the audited
+    commit: `empty`, zero rows, indistinguishable from a real empty index.
+
+    So presence is asked SEPARATELY from length (a page that was served and
+    parses to zero rows is a parser bug, and must not read as an
+    empty category):
+
+      listings  some query's `data.listings` is a list (even `[]`)
+      careers   `pageProps.jobs` is a list (even `[]`)
+      job       one of `role` / `poolListing` / `closedListing` is a KEY of
+                `pageProps` — a listing the site has taken down may carry
+                all three as null, which is the site speaking; none of them
+                existing is the shape having moved.
+    """
+    if not isinstance(payload, dict):
+        return False
+    props = (payload.get("props") or {}).get("pageProps")
+    if not isinstance(props, dict):
+        return False
+    if mode == "careers":
+        return isinstance(props.get("jobs"), list)
+    if mode == "job":
+        return any(k in props for k in ("role", "poolListing", "closedListing"))
+    for query in (props.get("dehydratedState") or {}).get("queries") or []:
+        data = ((query or {}).get("state") or {}).get("data")
+        if isinstance(data, dict) and isinstance(data.get("listings"), list):
+            return True
+    return False
+
+
 def detect_page_state(html: Optional[str], status: Optional[int] = None,
                       url: str = "", mode: str = DEFAULT_MODE) -> str:
     """Name what Mercor answered with.
@@ -1513,7 +1667,22 @@ def detect_page_state(html: Optional[str], status: Optional[int] = None,
         return "unknown"
 
     if payload is not None:
-        # Served, readable, and it told us there is nothing here.
+        # Served and parsed. Whether it told us there is nothing here, or we
+        # simply could not find where the records would be, is the whole
+        # difference between exit 4 and a parser that needs fixing — and it
+        # used to be decided by `payload is not None` alone.
+        if not expected_container_present(payload, mode):
+            return "parse_error"
+        if mode == "listings" and itemlist_urls(text):
+            # The response contradicts itself: the structured data indexes
+            # jobs while the payload holds none. Mercor states no catalogue
+            # total, but this is the same arithmetic as a served page
+            # inside its own total — a claim of "empty" that
+            # the page itself disproves. Measured 2026-10-07: 237 ItemList
+            # urls beside 305 payload records, so on a healthy page the
+            # JSON-LD is the SMALLER view, never a non-empty one beside an
+            # empty payload.
+            return "parse_error"
         return "empty"
 
     if len(text) > 2000:

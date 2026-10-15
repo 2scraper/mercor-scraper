@@ -1887,6 +1887,918 @@ def check_banned_wording():
     check("banned-wording scan ran", True)
 
 
+def _drive_scrape_over_a_job_queue(engine, urls, gone, concurrency,
+                                   failures=(), unreadable=(), mode="job",
+                                   empty=()):
+    """Run the REAL `scrape()` over an enumerated queue with the browser stubbed.
+
+    `gone` names the addresses the site answers 404 for; `failures` are the
+    enumeration sources that failed (empty = both answered). Everything else
+    is the real engine: planning, the sequential loop or the worker pool,
+    the merge, `finish_run` and the sidecar on disk.
+    """
+    import types
+    out = os.path.join(tempfile.mkdtemp(), "o")
+    saved_argv = list(sys.argv)
+    saved_apply = engine.env_config.apply
+    # `.env` must not decide this run: a MERCOR_URL there would name a route
+    # that disagrees with --mode job and abort argument parsing.
+    engine.env_config.apply = lambda a: None
+    sys.argv = ["playwright_scraper.py", "--mode", mode, "--pages",
+                str(len(urls) if mode == "job" else 1), "--delay", "0",
+                "--retries", "1",
+                "--concurrency", str(concurrency), "--format", "json",
+                "--out", out]
+    try:
+        args = engine.parse_args()
+    finally:
+        sys.argv = saved_argv
+        engine.env_config.apply = saved_apply
+
+    from output_writer import JobPosting
+
+    def fake_fetch(session, a, pool, page_num, url):
+        oc = engine.PageOutcome(page_num=page_num, url=url, final_url=url)
+        if url in gone:
+            oc.state, oc.products = "not_found", []
+        elif url in unreadable:
+            # Served, parsed, and the parser could not find the records.
+            oc.state, oc.products = "parse_error", []
+        elif url in empty:
+            # Served, parsed, and the site said there is nothing here.
+            oc.state, oc.products = "empty", []
+        else:
+            sku = (url.rsplit("/", 2)[-2] if mode == "job"
+                   else "row-%d" % page_num)
+            oc.state = "content"
+            oc.products = [JobPosting(source="mercor.com", scraped_at="t",
+                                      url=url, sku=sku, title=sku,
+                                      data_source="detail")]
+        return oc
+
+    class FakeSession:
+        def __init__(self, *a, **k):
+            self.pool = None
+            self.page = types.SimpleNamespace(url="x")
+        def open(self):
+            return self
+        def close(self):
+            pass
+
+    class FakePlaywright:
+        def __enter__(self):
+            return None
+        def __exit__(self, *a):
+            return False
+
+    real = (engine._fetch_one_page, engine._BrowserSession,
+            engine.sync_playwright, engine._enumerate_jobs)
+    engine._fetch_one_page = fake_fetch
+    engine._BrowserSession = FakeSession
+    engine.sync_playwright = lambda: FakePlaywright()
+    import product_parser as _pp
+    engine._enumerate_jobs = lambda session, a: _pp.EnumerationResult(
+        urls=list(urls), sitemap_urls=len(urls), explore_records=len(urls),
+        failures=list(failures))
+    try:
+        code = engine.scrape(args)
+    finally:
+        (engine._fetch_one_page, engine._BrowserSession,
+         engine.sync_playwright, engine._enumerate_jobs) = real
+    # A run that gathered nothing writes nothing, so absence
+    # of the files is an answer here, not an error.
+    try:
+        rows = json.load(open(out + ".json", encoding="utf-8"))
+        meta = json.load(open(out + ".meta.json", encoding="utf-8"))
+    except FileNotFoundError:
+        rows = meta = None
+    return code, rows, meta
+
+
+def check_a_withdrawn_listing_does_not_end_the_job_queue():
+    """The audit's P1, reproduced on the audited commit and now pinned.
+
+    Three enumerated addresses, the SECOND answering 404. Before the fix:
+    ONE row, `status: complete`, exit 0, `stop_reason: no_new_products`, and
+    the third address never fetched — because "this page added no new sku"
+    is the end-of-listing signal, which is right for slices of one result
+    and wrong for a queue of independent addresses.
+
+    Both paths are driven, because the concurrent worker had its OWN copy of
+    the same condition (`outcome.ok and not outcome.products`) and a fix to
+    the sequential loop alone leaves it.
+
+    "good, 404, good" is the sequence a queue must survive, and nothing here
+    ran it.
+    """
+    engine = _import_engine("playwright_scraper")
+    if engine is None:
+        return
+    U = ["https://work.mercor.com/jobs/list_AAA/a",
+         "https://work.mercor.com/jobs/list_DEAD/gone",
+         "https://work.mercor.com/jobs/list_CCC/c"]
+    for concurrency in (1, 2):
+        tag = "concurrency %d" % concurrency
+        code, rows, meta = _drive_scrape_over_a_job_queue(
+            engine, U, {U[1]}, concurrency)
+        equal("%s: the address AFTER the 404 is fetched" % tag,
+              sorted(r["sku"] for r in rows), ["list_AAA", "list_CCC"])
+        equal("%s: exit 0" % tag, code, 0)
+        equal("%s: the run is complete" % tag, meta["status"], "complete")
+        check("%s: and did NOT stop on 'no_new_products'" % tag,
+              meta["stop_reason"] != "no_new_products", meta["stop_reason"])
+        equal("%s: the gone address is recorded BY ADDRESS" % tag,
+              meta.get("urls_not_found"), [U[1]])
+        equal("%s: ...and counted" % tag, meta.get("jobs_not_found"), 1)
+
+    # The decision itself, for the modes whose pages ARE slices of one result.
+    import page_flow
+    check("a listing still ends on a page that adds nothing",
+          page_flow.a_page_without_rows_ends_the_run("listings"))
+    check("...and a job queue does not",
+          not page_flow.a_page_without_rows_ends_the_run("job"))
+
+
+def check_enumeration_says_which_source_failed():
+    """The audit's second P1, on the shared function.
+
+    Neither source contains the other (sitemap 447, index 390, shared 375,
+    union 462 on 2026-09-18), so a run holding only one is a known-lossy
+    fallback and must be able to say so. A source failed in TWO ways here,
+    and the quiet one is the one a try/except does not see: it answered and
+    held nothing.
+    """
+    import product_parser as P
+    sitemap = SITEMAP_XML
+    explore = EXPLORE_HTML
+    SM, EX = P.SITEMAP_URL, P.EXPLORE_URL
+
+    both = P.enumerate_job_sources(lambda u: sitemap if u == SM else explore)
+    check("both sources answering is complete", both.complete, str(both.failures))
+    check("...and the union is bigger than either alone",
+          len(both.urls) > both.sitemap_urls and len(both.urls) > both.explore_records)
+
+    def boom(u):
+        if u == SM:
+            raise RuntimeError("net::ERR_TIMED_OUT")
+        return explore
+    lost = P.enumerate_job_sources(boom)
+    check("a RAISING sitemap makes the enumeration incomplete", not lost.complete)
+    check("...names which source and why",
+          any(f.startswith("sitemap: RuntimeError") and "ERR_TIMED_OUT" in f
+              for f in lost.failures), str(lost.failures))
+    check("...and the run still has the other source's addresses",
+          len(lost.urls) == lost.explore_records > 0)
+
+    quiet = P.enumerate_job_sources(
+        lambda u: "<urlset></urlset>" if u == SM else explore)
+    check("a sitemap that ANSWERS and holds nothing is a failure too",
+          not quiet.complete
+          and any(f.startswith("sitemap: answered but held no job URLs")
+                  for f in quiet.failures), str(quiet.failures))
+    quiet2 = P.enumerate_job_sources(
+        lambda u: sitemap if u == SM else "<html>an error shell</html>")
+    check("...and so is an index that answers and holds nothing",
+          not quiet2.complete and any(f.startswith("explore:") for f in quiet2.failures))
+
+    nothing = P.enumerate_job_sources(lambda u: (_ for _ in ()).throw(OSError("x")))
+    check("both failing leaves no addresses and says so twice",
+          nothing.urls == [] and len(nothing.failures) == 2)
+
+    # An exception message is a log, and the sidecar is a file people share.
+    # Assembled from pieces: the repo's own credential scan (rightly) flags a
+    # literal `scheme://user:password@host`, including in a test about it.
+    secret = "hunter" + "2"
+    leaked = "tunnel to http://" + "u:" + secret + "@" + "exit.example:2334 failed"
+
+    def leaky(u):
+        raise RuntimeError(leaked)
+    masked = P.enumerate_job_sources(
+        leaky, scrub=lambda t: t.replace(secret, "***"))
+    check("exception text is scrubbed before it is stored",
+          secret not in json.dumps(masked.as_sidecar()),
+          json.dumps(masked.as_sidecar()))
+
+    sc = lost.as_sidecar()
+    equal("the sidecar says the enumeration was not whole",
+          sc["enumeration_complete"], False)
+    check("...with the per-source counts", sc["enumeration_sources"]["sitemap_urls"] == 0
+          and sc["enumeration_sources"]["explore_records"] > 0)
+    check("...and the failures", bool(sc["enumeration_failures"]))
+    check("a whole enumeration carries no failures key",
+          "enumeration_failures" not in both.as_sidecar())
+
+
+def check_a_flapping_source_is_retried_before_it_costs_the_run_its_status():
+    """Found live while testing the partial status itself.
+
+    A navigation still in flight aborted the NEXT enumeration read with
+    `net::ERR_ABORTED`, on a source that was perfectly healthy — and with a
+    single attempt per source that one blip would now turn a good run into a
+    `partial` (exit 6). Reporting a lost source loudly and retrying a flaky
+    one are one change, not two: either alone is wrong.
+    """
+    import product_parser as P
+    SM, EX = P.SITEMAP_URL, P.EXPLORE_URL
+    calls, naps = {"sitemap": 0, "explore": 0}, []
+
+    def flaky(u):
+        name = "sitemap" if u == SM else "explore"
+        calls[name] += 1
+        if name == "sitemap" and calls[name] < 3:
+            raise RuntimeError("net::ERR_ABORTED")
+        return SITEMAP_XML if name == "sitemap" else EXPLORE_HTML
+
+    got = P.enumerate_job_sources(flaky, attempts=3, pause=naps.append)
+    check("a source that recovers on attempt 3 leaves the run COMPLETE",
+          got.complete, str(got.failures))
+    equal("...having been tried exactly 3 times", calls["sitemap"], 3)
+    equal("...and the healthy source exactly once", calls["explore"], 1)
+    equal("...with a pause between attempts, not after the last", len(naps), 2)
+
+    calls.update(sitemap=0, explore=0)
+    def always(u):
+        calls["sitemap" if u == SM else "explore"] += 1
+        if u == SM:
+            raise RuntimeError("net::ERR_ABORTED")
+        return EXPLORE_HTML
+    dead = P.enumerate_job_sources(always, attempts=3, pause=lambda s: None)
+    check("a source that never recovers IS a failure", not dead.complete)
+    equal("...after exactly the attempts it was given", calls["sitemap"], 3)
+    check("...and the failure says how hard it was tried",
+          any("after 3 attempts" in f for f in dead.failures), str(dead.failures))
+
+    calls.update(sitemap=0, explore=0)
+    P.enumerate_job_sources(always, attempts=1)
+    equal("the default is ONE attempt, so nothing retries by accident",
+          calls["sitemap"], 1)
+
+    # An answer that is EMPTY is retried as well: a shell served mid-deploy
+    # is as transient as a dropped connection.
+    n = {"c": 0}
+    def shell_then_real(u):
+        if u == SM:
+            n["c"] += 1
+            return "<urlset></urlset>" if n["c"] == 1 else SITEMAP_XML
+        return EXPLORE_HTML
+    check("an empty answer that fills on retry is not a failure",
+          P.enumerate_job_sources(shell_then_real, attempts=2).complete)
+
+    # Both engines must actually pass their --retries budget through.
+    for module in ENGINES:
+        path = os.path.join(HERE, module + ".py")
+        if os.path.exists(path):
+            check("%s hands its --retries budget to the enumeration" % module,
+                  "attempts=args.retries" in open(path, encoding="utf-8").read())
+
+
+def check_a_moved_schema_is_not_an_empty_index():
+    """The audit's P2, and the half of it a relabel would have missed.
+
+    Renaming `listings` to `listingsV2` in a real capture gave `empty`, zero
+    rows — indistinguishable from a genuinely empty index. But changing the
+    label is not enough: an unreadable page is `ok` to the engine, so with
+    the label fixed a run still ended `single_page_route` (complete) with no
+    rows, and `finish_run` reported exit 4, "the listing is empty". The
+    page has to reach `pages_failed` and a stop reason that is not complete.
+    """
+    import copy
+    import product_parser as P
+
+    nd = P.extract_next_data(EXPLORE_HTML)
+
+    def page(payload, itemlist):
+        ld = ""
+        if itemlist:
+            ld = ('<script type="application/ld+json">' + json.dumps(
+                {"@type": "ItemList", "itemListElement": [
+                    {"@type": "ListItem",
+                     "url": "https://work.mercor.com/jobs/list_X/y"}]})
+                  + '</script>')
+        return ('<html><body>' + ld + '<script id="__NEXT_DATA__" '
+                'type="application/json" nonce="x">' + json.dumps(payload)
+                + '</script></body></html>')
+
+    emptied = copy.deepcopy(nd)
+    emptied["props"]["pageProps"]["dehydratedState"]["queries"][0][
+        "state"]["data"]["listings"] = []
+    renamed = copy.deepcopy(nd)
+    data = renamed["props"]["pageProps"]["dehydratedState"]["queries"][0][
+        "state"]["data"]
+    data["listingsV2"] = data.pop("listings")
+
+    def st(html, mode="listings"):
+        return P.detect_page_state(html, 200, P.EXPLORE_URL, mode)
+
+    equal("a real page is content", st(EXPLORE_HTML), "content")
+    equal("a genuinely EMPTY index is empty — the site said so",
+          st(page(emptied, itemlist=False)), "empty")
+    equal("a RENAMED key is parse_error, not empty",
+          st(page(renamed, itemlist=False)), "parse_error")
+    equal("...and so is an empty payload beside a JSON-LD that lists jobs "
+          "(the response contradicts itself)",
+          st(page(emptied, itemlist=True)), "parse_error")
+    check("a renamed key and a real empty index are no longer the same state",
+          st(page(renamed, itemlist=False)) != st(page(emptied, itemlist=False)))
+
+    # careers: `pageProps.jobs`
+    cn = P.extract_next_data(CAREERS_HTML)
+    c_empty = copy.deepcopy(cn); c_empty["props"]["pageProps"]["jobs"] = []
+    c_moved = copy.deepcopy(cn)
+    c_moved["props"]["pageProps"]["jobsV2"] = c_moved["props"]["pageProps"].pop("jobs")
+    equal("careers: an empty `jobs` list is empty",
+          st(page(c_empty, False), "careers"), "empty")
+    equal("careers: a missing `jobs` key is parse_error",
+          st(page(c_moved, False), "careers"), "parse_error")
+
+    # job: one of role / poolListing / closedListing must exist as a KEY
+    dn = P.extract_next_data(DETAIL_HTML)
+    gone = copy.deepcopy(dn)
+    gone["props"]["pageProps"].update(role=None, poolListing=None, closedListing=None)
+    moved = copy.deepcopy(dn)
+    for k in ("role", "poolListing", "closedListing"):
+        moved["props"]["pageProps"].pop(k, None)
+    equal("job: all three null is the SITE speaking (a taken-down listing)",
+          st(page(gone, False), "job"), "empty")
+    equal("job: none of the three existing is the shape having moved",
+          st(page(moved, False), "job"), "parse_error")
+
+    # ---- through the real scrape(): the exit code is the whole point ------
+    engine = _import_engine("playwright_scraper")
+    if engine is None:
+        return
+    EX = "https://work.mercor.com/explore"
+    code, rows, meta = _drive_scrape_over_a_job_queue(
+        engine, [EX], set(), 1, mode="listings", unreadable={EX})
+    equal("listings: an UNREADABLE page is exit 5, not exit 4", code, 5)
+    check("...and nothing is written over last night's good output",
+          rows is None and meta is None)
+    code, rows, meta = _drive_scrape_over_a_job_queue(
+        engine, [EX], set(), 1, mode="listings", empty={EX})
+    equal("listings: a genuinely EMPTY index is still exit 4", code, 4)
+
+    U = ["https://work.mercor.com/jobs/list_AAA/a",
+         "https://work.mercor.com/jobs/list_BAD/b",
+         "https://work.mercor.com/jobs/list_CCC/c"]
+    for concurrency in (1, 2):
+        tag = "concurrency %d" % concurrency
+        code, rows, meta = _drive_scrape_over_a_job_queue(
+            engine, U, set(), concurrency, unreadable={U[1]})
+        equal("%s: the readable addresses are kept" % tag,
+              sorted(r["sku"] for r in rows), ["list_AAA", "list_CCC"])
+        equal("%s: but the run is PARTIAL, exit 6" % tag,
+              (meta["status"], code), ("partial", 6))
+        equal("%s: for the right reason" % tag, meta["stop_reason"],
+              "parser_found_nothing")
+        equal("%s: the unreadable page is named BY NUMBER" % tag,
+              meta["pages_failed"], [2])
+        equal("%s: ...in its own field too" % tag,
+              meta.get("pages_unreadable"), [2])
+        check("%s: and it is not counted as a completed page" % tag,
+              meta["pages_completed"] == 2, str(meta["pages_completed"]))
+
+    import page_flow
+    equal("unreadable pages beat an incomplete enumeration as the stated cause",
+          page_flow.reconcile_stop_reason("completed", False, [2]),
+          page_flow.PARSER_FOUND_NOTHING)
+    equal("a worse failure keeps its own reason",
+          page_flow.reconcile_stop_reason("blocked_x", False, [2]), "blocked_x")
+    check("parser_found_nothing is NOT a complete stop reason",
+          page_flow.PARSER_FOUND_NOTHING not in
+          __import__("output_writer").COMPLETE_STOP_REASONS)
+
+
+def check_the_scraper_api_client_tells_unreadable_from_empty():
+    """The browserless client shares the classifier and had two gaps of its own.
+
+    It called `detect_page_state` WITHOUT `mode`, so every page was judged as
+    a listing — and its zero-row exit was `4` unconditionally, so a page the
+    reader could not parse would have told a pipeline the site was empty.
+    Driven through `_run_once` with the network stubbed.
+    """
+    import types
+    import scraper_api_client as C
+    import product_parser as P
+
+    nd = P.extract_next_data(EXPLORE_HTML)
+    import copy
+    renamed = copy.deepcopy(nd)
+    d = renamed["props"]["pageProps"]["dehydratedState"]["queries"][0]["state"]["data"]
+    d["listingsV2"] = d.pop("listings")
+    moved = ('<html><body><script id="__NEXT_DATA__" type="application/json" '
+             'nonce="x">' + json.dumps(renamed) + '</script></body></html>')
+
+    def run(html, status, mode, url):
+        out = os.path.join(tempfile.mkdtemp(), "o")
+        args = types.SimpleNamespace(
+            url=url, mode=mode, out=out, format="json", allow_empty=False,
+            dump_html=None, key="k", retries=0, retry_delay=0)
+        real = C.fetch_html
+        C.fetch_html = lambda a: (html, status)
+        try:
+            code = C._run_once(args)
+        finally:
+            C.fetch_html = real
+        return code, os.path.exists(out + ".json")
+
+    code, wrote = run(EXPLORE_HTML, 200, "listings", P.EXPLORE_URL)
+    check("a good listing still saves", code == 0 and wrote, str(code))
+    code, wrote = run(DETAIL_HTML, 200, "job", "https://work.mercor.com/jobs/list_X/y")
+    check("a good DETAIL page saves — it is judged as a detail page",
+          code == 0 and wrote, "exit %s" % code)
+    code, wrote = run(moved, 200, "listings", P.EXPLORE_URL)
+    equal("an UNREADABLE page is exit 5, not 4", code, 5)
+    check("...and writes nothing", not wrote)
+    src = open(os.path.join(HERE, "scraper_api_client.py"), encoding="utf-8").read()
+    check("it passes the mode to the classifier",
+          re.search(r"detect_page_state\([^)]*mode=args\.mode", src, re.S))
+
+
+def check_no_engine_dereferences_a_pool_that_may_not_exist():
+    """A retry path nobody ran, in two of three engines.
+
+    `--proxy` is optional, so `pool` is None on most runs. The Playwright
+    engine guarded every use; the mirrors did not, in three places. With no
+    proxy, any retryable page state — a 503, a parse error, a block — sent
+    Selenium and pyppeteer to `mask(pool.current)` and the run died with
+    `AttributeError: 'NoneType' object has no attribute 'current'` (exit 1,
+    a crash) instead of re-fetching. pyppeteer's variant was worse: its
+    load-failure rotation tested `load_failed and block_attempt <
+    block_retries`, and `block_retries` is BLOCK_RETRIES_WITHOUT_POOL (1)
+    with no pool, so ANY repeated load failure crashed it.
+
+    Invisible to import, `--help`, `compileall`, the undefined-name walk and
+    the whole offline suite, because none of them drives a retry with no
+    proxy. Found by running a real browser at a page the parser could not
+    read — the first time that state was reachable at all.
+
+    Every `pool.current` / `pool.advance` must sit under a condition that
+    mentions the pool (`has_pool`, `pool`) or the proxy derived from it.
+    """
+    for module in ENGINES:
+        path = os.path.join(HERE, module + ".py")
+        if not os.path.exists(path):
+            continue
+        tree = ast.parse(open(path, encoding="utf-8").read())
+        parents = {}
+        for node in ast.walk(tree):
+            for child in ast.iter_child_nodes(node):
+                parents[child] = node
+        sites, bad = 0, []
+        for node in ast.walk(tree):
+            if not (isinstance(node, ast.Attribute)
+                    and isinstance(node.value, ast.Name)
+                    and node.value.id == "pool"
+                    and node.attr in ("current", "advance")):
+                continue
+            sites += 1
+            guarded, up = False, parents.get(node)
+            while up is not None and not isinstance(
+                    up, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                tests = []
+                if isinstance(up, (ast.If, ast.IfExp, ast.While)):
+                    tests.append(ast.dump(up.test))
+                elif isinstance(up, ast.BoolOp):
+                    tests.append(ast.dump(up))
+                if any(("has_pool" in t or "id='pool'" in t
+                        or "id='proxy'" in t) for t in tests):
+                    guarded = True
+                    break
+                up = parents.get(up)
+            if not guarded:
+                bad.append(node.lineno)
+        check("%s guards every use of the proxy pool" % module,
+              not bad, "unguarded at line(s) %s — a run with no --proxy "
+              "crashes there" % bad)
+        check("%s: the scan found pool uses at all" % module, sites >= 3,
+              "found %d" % sites)
+
+
+def _write_run(directory, name, rows, **meta):
+    """A run on disk: rows plus the sidecar `finish_run` would write."""
+    base = {"source": "mercor.com", "mode": "listings", "status": "complete",
+            "stop_reason": "single_page_route", "pages_requested": 1,
+            "pages_completed": 1, "pages_failed": [], "products": len(rows),
+            "start_url": None}
+    base.update(meta)
+    path = os.path.join(directory, name + ".json")
+    json.dump(rows, open(path, "w", encoding="utf-8"))
+    if base.get("_no_sidecar"):
+        return path
+    json.dump({k: v for k, v in base.items() if not k.startswith("_")},
+              open(os.path.join(directory, name + ".meta.json"), "w",
+                   encoding="utf-8"))
+    return path
+
+
+def _run_diff(old, new, *flags):
+    import contextlib
+    import diff_runs
+    buf = io.StringIO()
+    saved = list(sys.argv)
+    sys.argv = ["diff_runs.py", "--old", old, "--new", new] + list(flags)
+    try:
+        with contextlib.redirect_stdout(buf):
+            code = diff_runs.main()
+    finally:
+        sys.argv = saved
+    return code, buf.getvalue()
+
+
+def check_diff_compares_the_whole_selection_and_demands_a_sidecar():
+    """The audit's P2 on diff_runs, in the parts it was right about.
+
+    Two COMPLETE listings runs under different `--domain` filters were
+    accepted as comparable (2 added, 2 removed, exit 0, no refusal) because
+    this repo wrote `domain_filter` into the sidecar and never read it back.
+    And a run with no sidecar passed silently, because "nothing to check".
+    """
+    d = tempfile.mkdtemp()
+    A = [{"sku": "list_A", "title": "a", "domain": "Finance"}]
+    B = [{"sku": "list_B", "title": "b", "domain": "Law"}]
+
+    old = _write_run(d, "fin", A, domain_filter="Finance")
+    new = _write_run(d, "law", B, domain_filter="Law")
+    code, out = _run_diff(old, new)
+    equal("different --domain filters are refused", code, 2)
+    check("...naming the differing key and both values",
+          "domain_filter" in out and "'finance'" in out and "'law'" in out, out)
+    code, out = _run_diff(old, new, "--force")
+    equal("--force still lets someone compare them", code, 0)
+
+    same = _write_run(d, "fin2", A, domain_filter=" FINANCE ")
+    code, out = _run_diff(old, same)
+    equal("the same filter, spelled differently, is the same selection", code, 0)
+
+    # "no --url" and an explicit --url of the mode's own route are one selection.
+    import product_parser as P
+    dflt = _write_run(d, "dflt", A)
+    expl = _write_run(d, "expl", A, start_url=P.EXPLORE_URL)
+    code, out = _run_diff(dflt, expl)
+    equal("no --url and the mode's own --url are the SAME selection", code, 0)
+    other = _write_run(d, "other", A, mode="job", stop_reason="completed",
+                       start_url="https://work.mercor.com/jobs/list_X/y")
+    _, out = _run_diff(dflt, other)
+    check("a different mode is still reported as a mode difference",
+          "different modes" in out or "different POPULATIONS" in out, out)
+
+    # ---- the sidecar ------------------------------------------------------
+    bare = _write_run(d, "bare", A, _no_sidecar=True)
+    code, out = _run_diff(bare, dflt)
+    equal("a run with NO sidecar is refused", code, 2)
+    check("...and the refusal says what is missing and how to proceed",
+          ".meta.json" in out and "--force" in out, out)
+    code, out = _run_diff(bare, dflt, "--force")
+    equal("...but --force still compares it", code, 0)
+    both_bare = _write_run(d, "bare2", A, _no_sidecar=True)
+    code, _ = _run_diff(bare, both_bare)
+    equal("two sidecar-less runs are refused too", code, 2)
+
+    # A partial run is still refused, as before.
+    part = _write_run(d, "part", A, status="partial",
+                      stop_reason="enumeration_incomplete")
+    code, out = _run_diff(dflt, part)
+    equal("a partial run is still refused", code, 2)
+
+
+def check_a_bounded_run_reports_the_slice_moving_not_listings_leaving():
+    """`removed` was being said about listings that were merely not fetched.
+
+    A `--mode job --pages 5` run holds the first five addresses of 462; a
+    listing absent from it has not been shown to be gone. The relabelling is
+    in the headline because a reader who sees "N removed" stops there, and
+    `--fail-on-change` must not fire for it: a cron job that pages someone
+    when `--pages` moved the cut is paging them about its own configuration.
+    """
+    d = tempfile.mkdtemp()
+    full = [{"sku": "list_%d" % i, "title": "t%d" % i} for i in range(6)]
+    cut = full[:3]
+    job = dict(mode="job", stop_reason="completed")
+    old = _write_run(d, "o", full, jobs_enumerated=6, jobs_fetched=6, **job)
+    new = _write_run(d, "n", cut, jobs_enumerated=6, jobs_fetched=3, **job)
+
+    code, out = _run_diff(old, new)
+    headline = next((l for l in out.splitlines() if l.startswith("[+]")), "")
+    check("a bounded run says 'left the slice', not 'removed'",
+          "left it" in headline and " removed" not in headline, headline)
+    check("...and explains why in the same line",
+          "fetched fewer jobs" in headline, headline)
+    equal("movement of a SLICE does not fail --fail-on-change",
+          _run_diff(old, new, "--fail-on-change")[0], 0)
+
+    # The same two runs, both whole: a real removal MUST still fail it.
+    new_whole = _write_run(d, "nw", cut, jobs_enumerated=3, jobs_fetched=3, **job)
+    code, out = _run_diff(old, new_whole, "--fail-on-change")
+    equal("a genuine removal between two whole runs still fails it", code, 1)
+    headline = next((l for l in out.splitlines() if l.startswith("[+]")), "")
+    check("...and is still called a removal",
+          " removed" in headline and "left it" not in headline, headline)
+
+    # A real CHANGE on a shared sku is real whether or not a slice moved.
+    changed = [dict(full[0], title="renamed")] + full[1:3]
+    new_c = _write_run(d, "nc", changed, jobs_enumerated=6, jobs_fetched=3, **job)
+    equal("a change to a listing in both runs fails it even when bounded",
+          _run_diff(old, new_c, "--fail-on-change")[0], 1)
+
+
+def check_the_scraper_api_client_writes_the_sidecar_diff_now_requires():
+    """The order matters, and it was the order the audit's proposal had wrong.
+
+    Requiring a sidecar before this client wrote one would have refused every
+    diff of its output for a reason that is the client's defect, not the
+    user's. So the client changed first, and this pins that it stays so.
+    """
+    import types
+    import scraper_api_client as C
+    out = os.path.join(tempfile.mkdtemp(), "o")
+    args = types.SimpleNamespace(
+        url="https://work.mercor.com/explore", mode="listings", out=out,
+        format="json", allow_empty=False, dump_html=None, key="k",
+        retries=0, retry_delay=0)
+    real = C.fetch_html
+    C.fetch_html = lambda a: (EXPLORE_HTML, 200)
+    try:
+        code = C._run_once(args)
+    finally:
+        C.fetch_html = real
+    equal("the client runs", code, 0)
+    check("...and writes a sidecar", os.path.exists(out + ".meta.json"))
+    meta = json.load(open(out + ".meta.json", encoding="utf-8"))
+    equal("...saying what it is", (meta["mode"], meta["status"]),
+          ("listings", "complete"))
+    code, text = _run_diff(out + ".json", out + ".json")
+    equal("so its own output diffs against itself", code, 0)
+
+
+def check_a_lost_source_makes_the_run_partial_not_complete():
+    """Through the real `scrape()`, both paths.
+
+    Reproduced on the audited commit: the sitemap raising, the index holding
+    7 records, 100 pages asked for -> 7 rows, `status: complete`, exit 0,
+    `page_cap_reached`. The warning was in a log; the sidecar said nothing.
+
+    Now: the rows are KEPT (they are real), the status is `partial`, exit 6,
+    the stop reason is `enumeration_incomplete`, and the failure is in the
+    sidecar — which also makes `diff_runs.py` refuse to treat it as a full
+    snapshot, since it refuses anything that is not `complete`.
+    """
+    engine = _import_engine("playwright_scraper")
+    if engine is None:
+        return
+    import page_flow
+    U = ["https://work.mercor.com/jobs/list_AAA/a",
+         "https://work.mercor.com/jobs/list_BBB/b",
+         "https://work.mercor.com/jobs/list_CCC/c"]
+    for concurrency in (1, 2):
+        tag = "concurrency %d" % concurrency
+        code, rows, meta = _drive_scrape_over_a_job_queue(
+            engine, U, set(), concurrency,
+            failures=["sitemap: RuntimeError: net::ERR_TIMED_OUT"])
+        equal("%s: every address it WAS given is fetched" % tag, len(rows), 3)
+        equal("%s: but the run is PARTIAL" % tag, meta["status"], "partial")
+        equal("%s: exit 6" % tag, code, 6)
+        equal("%s: the stop reason names the cause" % tag,
+              meta["stop_reason"], page_flow.ENUMERATION_INCOMPLETE)
+        equal("%s: the sidecar says the enumeration was not whole" % tag,
+              meta.get("enumeration_complete"), False)
+        check("%s: ...and why" % tag,
+              any("sitemap" in f for f in meta.get("enumeration_failures", [])),
+              str(meta.get("enumeration_failures")))
+
+    code, rows, meta = _drive_scrape_over_a_job_queue(engine, U, set(), 1)
+    equal("a whole enumeration is still complete", meta["status"], "complete")
+    equal("...and says so", meta.get("enumeration_complete"), True)
+
+    # The decision, on its own. A worse failure must not be hidden by it.
+    r = page_flow.reconcile_stop_reason
+    equal("a run about to be 'complete' is overridden",
+          r("page_cap_reached", False), page_flow.ENUMERATION_INCOMPLETE)
+    equal("...also 'completed'", r("completed", False), page_flow.ENUMERATION_INCOMPLETE)
+    equal("a blocked run keeps its worse reason", r("blocked_x", False), "blocked_x")
+    equal("a whole enumeration changes nothing", r("completed", True), "completed")
+    equal("a mode that enumerates nothing changes nothing",
+          r("single_page_route", None), "single_page_route")
+    check("enumeration_incomplete is NOT a complete stop reason",
+          page_flow.ENUMERATION_INCOMPLETE not in
+          __import__("output_writer").COMPLETE_STOP_REASONS)
+
+
+def check_every_engine_reconciles_and_reports_the_enumeration():
+    """A fix that reaches one engine of three is the drift page_flow exists
+    to prevent, and the mirrors' `scrape()` cannot be driven offline without
+    their libraries — so this is pinned by source, per engine.
+    """
+    for module in ENGINES:
+        path = os.path.join(HERE, module + ".py")
+        if not os.path.exists(path):
+            continue
+        src = open(path, encoding="utf-8").read()
+        equal("%s reconciles the stop reason against the enumeration" % module,
+              src.count("page_flow.reconcile_stop_reason("), 1)
+        equal("%s writes the enumeration into the sidecar" % module,
+              src.count("enumeration.as_sidecar()"), 1)
+        equal("%s counts pages through the shared accounting" % module,
+              src.count("page_flow.account_for_pages("), 1)
+        check("%s passes the unreadable pages to the reconciliation" % module,
+              "unreadable_pages)" in src.replace("\n", " "),
+              "without them a page the parser could not read is `ok`")
+        check("%s reads the enumeration through the shared function" % module,
+              "enumerate_job_sources(" in src,
+              "a private copy of the logic is how three engines drift")
+        check("%s no longer swallows a failed source into a warning" % module,
+              "Falling back to the" not in src,
+              "the pre-fix per-engine fallback text is back")
+
+
+def check_every_engine_asks_the_shared_policy_before_ending_a_queue():
+    """Three copies of one condition, and the fix must reach all of them.
+
+    The Playwright engine has TWO (sequential and worker), the mirrors one
+    each. Pinned by source because the mirrors cannot be driven offline
+    without their libraries — and a fix that reaches two engines of three is
+    the drift `page_flow` exists to prevent.
+    """
+    for module in ENGINES:
+        path = os.path.join(HERE, module + ".py")
+        if not os.path.exists(path):
+            continue
+        src = open(path, encoding="utf-8").read()
+        want = 2 if module == "playwright_scraper" else 1
+        got = src.count("a_page_without_rows_ends_the_run(")
+        check("%s consults the policy at each place it would end a run "
+              "(%d)" % (module, want), got == want,
+              "found %d; an unconditional `if not fresh_count: break` is back"
+              % got)
+        # The unconditional form must be gone.
+        check("%s has no unconditional end-on-no-new-rows" % module,
+              not re.search(r"if not fresh_count:\s*\n\s*logger\.info\("
+                            r"\"Page %d added no rows not already seen", src),
+              "the pre-fix shape is present")
+
+
+# Words that belong to the sites this repo was copied from. A COMMENT may
+# cite them (provenance is honest and several do); a string a USER reads may
+# not — the audit found another site's query parameter and "a scored
+# address gets on every route here" in this repo's own --help, both inherited and both false.
+# Assembled from pieces so this file can be scanned too.
+_OTHER_SITES_WORDS = re.compile(
+    r"find_" + r"country|scored " + r"address|well" + r"found|angel" + r"list|"
+    r"better " + r"business|\bB" + r"BB\b|rak" + r"uten|tokop" + r"edia|"
+    r"far" + r"fetch", re.I)
+
+
+def check_no_user_visible_string_carries_another_sites_words():
+    """Copied text is the part with no evidence behind it.
+
+    "Cleaning up the template" had already happened once (a commit titled
+    for exactly that), and the audit still found three leftovers, because
+    the cleanup was done by search and replace over FILES rather than by
+    asking what a USER reads.
+
+    The first version of this walked only CALLS that produce text (help,
+    logger.*, error, print) — and a control planted the donor word into a
+    shared constant in `page_flow` and stayed GREEN: moving the text out of
+    the call into a named constant had hidden it from the check written to
+    watch it. So this reads EVERY string constant that is not a docstring,
+    in every module. Measured when it was widened: 2,130 constants, 0 hits
+    on the cleaned tree, so there is no exemption list to rot.
+    Docstrings and comments stay exempt on purpose: they cite precedent.
+    """
+    scanned, offenders = 0, []
+    for filename in sorted(os.listdir(HERE)):
+        if not filename.endswith(".py") or filename == "smoke_test.py":
+            continue
+        tree = ast.parse(open(os.path.join(HERE, filename),
+                              encoding="utf-8").read())
+        docstrings = set()
+        for node in ast.walk(tree):
+            if (isinstance(node, (ast.Module, ast.FunctionDef, ast.ClassDef,
+                                  ast.AsyncFunctionDef)) and node.body
+                    and isinstance(node.body[0], ast.Expr)
+                    and isinstance(getattr(node.body[0], "value", None),
+                                   ast.Constant)
+                    and isinstance(node.body[0].value.value, str)):
+                docstrings.add(id(node.body[0].value))
+        for node in ast.walk(tree):
+            if (isinstance(node, ast.Constant) and isinstance(node.value, str)
+                    and id(node) not in docstrings):
+                scanned += 1
+                m = _OTHER_SITES_WORDS.search(node.value)
+                if m:
+                    offenders.append("%s:%d %r in %r" % (
+                        filename, node.lineno, m.group(0), node.value[:100]))
+    # ONE check carrying the offenders, not one per string: a count inflated
+    # by thousands of trivially-passing assertions says nothing, and hides
+    # the day one of them matters.
+    check("no user-visible string carries another site's words",
+          not offenders, "; ".join(offenders))
+    check("the scan looked at string constants at all", scanned > 500,
+          "scanned %d" % scanned)
+
+    # And the texts three engines must agree on are defined ONCE. The
+    # drift this guards against was real: three engines, three different
+    # claims about --solve-captcha, two inherited and one flatly wrong.
+    for module in ENGINES:
+        path = os.path.join(HERE, module + ".py")
+        if not os.path.exists(path):
+            continue
+        src = open(path, encoding="utf-8").read()
+        check("%s takes --solve-captcha help from page_flow" % module,
+              "help=page_flow.SOLVE_CAPTCHA_HELP" in src.replace("\n", " ")
+              or "page_flow.SOLVE_CAPTCHA_HELP" in src)
+        check("%s takes --locale help from page_flow" % module,
+              "page_flow.LOCALE_HELP" in src)
+
+
+def check_no_live_count_is_stated_as_current_in_a_user_visible_string():
+    """A number describing a living thing is paired with the
+    command that produces it, or left out.
+
+    Three user-visible strings said "390 contract roles", "462 jobs" and "the
+    72 listings the index does not show". Each was true on 2026-09-18 and
+    read as current; by 2026-10-07 the figures were 305, 306 and 1. The
+    point is not those numbers: it is that the SIZE OF THE GAP is the thing
+    that moves, and a message printed on every run is exactly where a stale
+    one does the most damage.
+
+    Dated figures are still welcome in docstrings and comments, where they
+    are records of a measurement. In anything a user reads at run time the
+    run itself measures them (sidecar: `records_in_payload`,
+    `enumeration_sources`).
+    """
+    count_phrase = re.compile(
+        r"\b\d{2,}\s+(?:contract\s+|live\s+|detail\s+)?"
+        r"(?:listings?|jobs?|roles?|URLs?|records?|adverts?|openings?)\b", re.I)
+    offenders, scanned = [], 0
+    for filename in sorted(os.listdir(HERE)):
+        if not filename.endswith(".py") or filename == "smoke_test.py":
+            continue
+        tree = ast.parse(open(os.path.join(HERE, filename),
+                              encoding="utf-8").read())
+        docstrings = set()
+        for node in ast.walk(tree):
+            if (isinstance(node, (ast.Module, ast.FunctionDef, ast.ClassDef,
+                                  ast.AsyncFunctionDef)) and node.body
+                    and isinstance(node.body[0], ast.Expr)
+                    and isinstance(getattr(node.body[0], "value", None),
+                                   ast.Constant)
+                    and isinstance(node.body[0].value.value, str)):
+                docstrings.add(id(node.body[0].value))
+        for node in ast.walk(tree):
+            if (isinstance(node, ast.Constant) and isinstance(node.value, str)
+                    and id(node) not in docstrings):
+                scanned += 1
+                m = count_phrase.search(node.value)
+                if m:
+                    offenders.append("%s:%d %r" % (filename, node.lineno,
+                                                   m.group(0)))
+    check("no user-visible string states a live count as current",
+          not offenders, "; ".join(offenders))
+    check("the scan looked at string constants at all", scanned > 500,
+          "scanned %d" % scanned)
+    # The shared texts exist and carry no digit run at all.
+    import page_flow
+    for name in ("MODE_HELP", "LISTINGS_NOT_EXHAUSTIVE_NOTE",
+                 "PAGES_IGNORED_WARNING"):
+        text = getattr(page_flow, name)
+        check("page_flow.%s states no count" % name,
+              not re.search(r"\b\d{3,}\b", text.replace("2026-09-18", "")
+                            .replace("2026-10-07", "")), text[:80])
+
+
+def check_retries_zero_is_refused_not_obeyed():
+    """The audit's `--retries 0`, and it was worse than reported.
+
+    `range(1, 0 + 1)` is empty, so the load loop never ran: no navigation,
+    the browser's empty document (39 bytes) was read, the run waited out its
+    full 45 s readiness timeout for a page it never requested, and exit 4
+    said "this listing is empty". Measured live before the fix.
+
+    It is a usage error, and exit 2 is the family's number for one.
+    """
+    for module in ENGINES:
+        engine = _import_engine(module)
+        if engine is None:
+            continue
+        saved_argv, saved_apply = list(sys.argv), engine.env_config.apply
+        engine.env_config.apply = lambda a: None
+        try:
+            for bad in ("0", "-1"):
+                sys.argv = [module + ".py", "--retries", bad]
+                try:
+                    engine.parse_args()
+                    code = "accepted"
+                except SystemExit as exc:
+                    code = exc.code
+                equal("%s refuses --retries %s with exit 2" % (module, bad),
+                      code, 2)
+            sys.argv = [module + ".py", "--retries", "1"]
+            check("%s still accepts --retries 1" % module,
+                  engine.parse_args().retries == 1)
+        finally:
+            sys.argv, engine.env_config.apply = saved_argv, saved_apply
+
+
 def check_concurrency_with_the_browser_stubbed():
     """A live run cannot always reach this machinery.
 
@@ -1903,7 +2815,10 @@ def check_concurrency_with_the_browser_stubbed():
         retries = 1
         retry_delay = 0
         out = "unused"
-        mode = "search"
+        # A mode this repo really has. This said "search" — BBB's, from the
+        # donor — which is not a mode here, so the check was exercising a
+        # branch keyed on something that cannot occur.
+        mode = "listings"
         sort = "a-z"
         pages = 50
 
