@@ -690,7 +690,7 @@ def enumerate_job_sources(fetch_source, scrub=lambda text: text,
     with `net::ERR_ABORTED`, on a source that was perfectly healthy.
 
     `scrub` is applied to every exception message before it is stored or
-    logged. An exception message is a log (CLAUDE.md §8), and one raised
+    logged. An exception message ends up in logs and the sidecar, and one raised
     through a proxy can carry its credentials — the sidecar is a file that
     gets shared.
     """
@@ -1565,8 +1565,8 @@ def expected_container_present(payload: Any, mode: str) -> bool:
     `listings` to `listingsV2` in a real capture reproduced it on the audited
     commit: `empty`, zero rows, indistinguishable from a real empty index.
 
-    So presence is asked SEPARATELY from length (CLAUDE.md §20: a page that
-    was served and parses to zero rows is your bug, and must not read as an
+    So presence is asked SEPARATELY from length (a page that was served and
+    parses to zero rows is a parser bug, and must not read as an
     empty category):
 
       listings  some query's `data.listings` is a list (even `[]`)
@@ -1677,7 +1677,7 @@ def detect_page_state(html: Optional[str], status: Optional[int] = None,
             # The response contradicts itself: the structured data indexes
             # jobs while the payload holds none. Mercor states no catalogue
             # total, but this is the same arithmetic as a served page
-            # inside its own total (CLAUDE.md §26) — a claim of "empty" that
+            # inside its own total — a claim of "empty" that
             # the page itself disproves. Measured 2026-10-07: 237 ItemList
             # urls beside 305 payload records, so on a healthy page the
             # JSON-LD is the SMALLER view, never a non-empty one beside an

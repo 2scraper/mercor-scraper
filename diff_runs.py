@@ -374,8 +374,8 @@ def _check_comparable(args) -> bool:
         if status is None:
             # NOT "nothing to check". A run with no sidecar cannot be told
             # from a partial one, and the family refuses to diff a partial
-            # run because its un-fetched pages read as delisted listings
-            # (CLAUDE.md §8). Letting an unverifiable run through is the
+            # run because its un-fetched pages read as delisted listings.
+            # Letting an unverifiable run through is the
             # same hole by another door.
             #
             # This used to be waved through because the Scraper API client

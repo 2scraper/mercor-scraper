@@ -1965,7 +1965,7 @@ def _drive_scrape_over_a_job_queue(engine, urls, gone, concurrency,
     finally:
         (engine._fetch_one_page, engine._BrowserSession,
          engine.sync_playwright, engine._enumerate_jobs) = real
-    # A run that gathered nothing writes nothing (CLAUDE.md §8), so absence
+    # A run that gathered nothing writes nothing, so absence
     # of the files is an answer here, not an error.
     try:
         rows = json.load(open(out + ".json", encoding="utf-8"))
@@ -1981,14 +1981,15 @@ def check_a_withdrawn_listing_does_not_end_the_job_queue():
     Three enumerated addresses, the SECOND answering 404. Before the fix:
     ONE row, `status: complete`, exit 0, `stop_reason: no_new_products`, and
     the third address never fetched — because "this page added no new sku"
-    is §7's end-of-listing signal, which is right for slices of one result
+    is the end-of-listing signal, which is right for slices of one result
     and wrong for a queue of independent addresses.
 
     Both paths are driven, because the concurrent worker had its OWN copy of
     the same condition (`outcome.ok and not outcome.products`) and a fix to
     the sequential loop alone leaves it.
 
-    "good, 404, good" is the sequence §10 asks for and nothing here ran.
+    "good, 404, good" is the sequence a queue must survive, and nothing here
+    ran it.
     """
     engine = _import_engine("playwright_scraper")
     if engine is None:
@@ -2064,7 +2065,7 @@ def check_enumeration_says_which_source_failed():
     check("both failing leaves no addresses and says so twice",
           nothing.urls == [] and len(nothing.failures) == 2)
 
-    # §8: an exception message is a log, and the sidecar is a file people share.
+    # An exception message is a log, and the sidecar is a file people share.
     # Assembled from pieces: the repo's own credential scan (rightly) flags a
     # literal `scheme://user:password@host`, including in a test about it.
     secret = "hunter" + "2"
@@ -2637,9 +2638,9 @@ def check_every_engine_asks_the_shared_policy_before_ending_a_queue():
 
 # Words that belong to the sites this repo was copied from. A COMMENT may
 # cite them (provenance is honest and several do); a string a USER reads may
-# not — the audit found `find_country` and "a scored address gets on every
-# route here" in this repo's own --help, both inherited and both false.
-# Assembled from pieces so this file can be scanned too (§22).
+# not — the audit found another site's query parameter and "a scored
+# address gets on every route here" in this repo's own --help, both inherited and both false.
+# Assembled from pieces so this file can be scanned too.
 _OTHER_SITES_WORDS = re.compile(
     r"find_" + r"country|scored " + r"address|well" + r"found|angel" + r"list|"
     r"better " + r"business|\bB" + r"BB\b|rak" + r"uten|tokop" + r"edia|"
@@ -2647,7 +2648,7 @@ _OTHER_SITES_WORDS = re.compile(
 
 
 def check_no_user_visible_string_carries_another_sites_words():
-    """§16/§17: copied text is the part with no evidence behind it.
+    """Copied text is the part with no evidence behind it.
 
     "Cleaning up the template" had already happened once (a commit titled
     for exactly that), and the audit still found three leftovers, because
@@ -2710,7 +2711,7 @@ def check_no_user_visible_string_carries_another_sites_words():
 
 
 def check_no_live_count_is_stated_as_current_in_a_user_visible_string():
-    """§13 rule 3: a number describing a living thing is paired with the
+    """A number describing a living thing is paired with the
     command that produces it, or left out.
 
     Three user-visible strings said "390 contract roles", "462 jobs" and "the

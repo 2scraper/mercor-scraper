@@ -315,7 +315,7 @@ def pagination_is_addressable(url: str) -> bool:
 def a_page_without_rows_ends_the_run(mode: str) -> bool:
     """Whether a served page that adds no new rows means "there is no more".
 
-    CLAUDE.md §7 layer 3 — "this page added no new sku" is the terminating
+    "This page added no new sku" is the terminating
     condition for a LISTING, where pages are slices of ONE result and a page
     that adds nothing means the slices have run out (or are looping back).
 
@@ -352,8 +352,8 @@ def account_for_pages(outcomes):
     (exit 4). In `--mode job` the same page simply vanished from a run that
     went on to report `complete`.
 
-    An unreadable page is a FAILED page, by number (CLAUDE.md §8: which
-    pages, not how many), so `finish_run` sees `not complete` and the
+    An unreadable page is a FAILED page, by number (which pages, not how many,
+    so the sidecar can say what is missing), so `finish_run` sees `not complete` and the
     zero-row case becomes exit 5 — "nothing was gathered, nothing can be
     concluded" — instead of exit 4's claim that the answer was nothing.
     """
@@ -488,7 +488,7 @@ RETRIES_MUST_BE_POSITIVE = (
     "run then waits out its full readiness timeout and reports exit 4 — "
     "'this listing is empty' — for a page it never requested.")
 
-# NO LIVE COUNT in any of the three below, on purpose (CLAUDE.md §13: a number
+# NO LIVE COUNT in any of the three below, on purpose (a number
 # describing a living thing is paired with the command that produces it, or
 # left out). They used to say "390 contract roles", "462 jobs" and "the 72
 # listings the index does not show" — figures from 2026-09-18 that read as
