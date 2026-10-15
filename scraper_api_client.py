@@ -265,6 +265,31 @@ def _run_once(args, attempt: int = 1, attempts: int = 1) -> int:
             upstream_status, len(html), dump)
         return 3
 
+    stop_reason = ("single_page_route" if args.mode in ("listings", "careers")
+                   else "completed")
+    if state == "not_found":
+        # `upstream_status` is the TARGET's status: the Scraper API answers
+        # HTTP 200 and carries a site 404 in `http_code` (its documentation
+        # says a site 404 "is returned with HTTP 200 from the API"). The API's
+        # own 404 means an unknown task id on the async result endpoint, which
+        # this client does not call, and any non-200 from the API is exit 5
+        # above. So this is Mercor saying the address does not exist: the
+        # same `not_found` the browser engines reach from goto()'s status,
+        # and the same exit 4 and sidecar they produce for it.
+        logger.warning("Mercor answered HTTP %s for %s: no such %s. Exit 4, "
+                       "a real answer from the site, not a failed fetch.",
+                       upstream_status, args.url,
+                       "job" if args.mode == "job" else "page")
+        extra = {"route_is_paginated": args.mode == "job", "mode": args.mode}
+        if args.mode == "job":
+            extra["jobs_not_found"] = 1
+            extra["urls_not_found"] = [args.url]
+        return finish_run([], args.out, args.format, args.allow_empty,
+                          blocked=False, stop_reason=stop_reason,
+                          pages_requested=1, pages_completed=1,
+                          mode=args.mode, source=SOURCE_DEFAULT,
+                          start_url=args.url, final_url=args.url, extra=extra)
+
     vendor = detect_bot_challenge(html)
     if vendor:
         logger.error(
@@ -314,7 +339,14 @@ def _run_once(args, attempt: int = 1, attempts: int = 1) -> int:
                          "(exit 4). The saved response shows what changed.",
                          EXIT_API_ERROR)
             return EXIT_API_ERROR
-        return 4
+        # Served, and the site's own payload holds nothing: exit 4 through
+        # the same `finish_run` as the browser engines, so `--allow-empty`
+        # writes the same empty output and sidecar here as there.
+        return finish_run([], args.out, args.format, args.allow_empty,
+                          blocked=False, stop_reason=stop_reason,
+                          pages_requested=1, pages_completed=1,
+                          mode=args.mode, source=SOURCE_DEFAULT,
+                          start_url=args.url, final_url=args.url)
 
     # Through `finish_run`, not a bare `save`. This client used to write rows
     # and NO sidecar, which was true and defensible while nothing depended on
@@ -325,10 +357,7 @@ def _run_once(args, attempt: int = 1, attempts: int = 1) -> int:
     # would have been refused for a reason that is the client's, not the
     # user's.
     return finish_run(products, args.out, args.format, args.allow_empty,
-                      blocked=False,
-                      stop_reason=("single_page_route"
-                                   if args.mode in ("listings", "careers")
-                                   else "completed"),
+                      blocked=False, stop_reason=stop_reason,
                       pages_requested=1, pages_completed=1,
                       mode=args.mode, source=SOURCE_DEFAULT,
                       start_url=args.url, final_url=args.url)

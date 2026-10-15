@@ -11,6 +11,19 @@ it from a bill or from a diff.
 
 ## [Unreleased]
 
+### Fixed
+- **`scraper_api_client.py` handles a Mercor 404 the way the browser engines
+  do.** The exit code was already 4 and stays 4. A dead job answered through
+  the Scraper API (HTTP 200 with `http_code: 404`) is now named `not_found` in
+  the log. With `--allow-empty` it also writes the same empty output and
+  sidecar as Playwright (`stop_reason`, `urls_not_found`, `jobs_not_found`).
+  Before, it returned 4 with no sidecar and logged "0 jobs parsed". A
+  non-200 from the Scraper API itself is still exit 5. A served page with
+  no records (exit 4) now also goes through the shared writer, so
+  `--allow-empty` writes its output and sidecar on that path too. An offline check
+  runs the client against a sanitized real Mercor 404 and the Playwright
+  engine against the same page, and compares the two.
+
 ## [0.1.1] — 2026-10-07
 
 > **Behaviour changes for an existing user — read these before upgrading.**

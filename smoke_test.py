@@ -3445,6 +3445,148 @@ def check_scraper_api_payload_and_status():
           "not the API's own 'success'", status == 403, "got %r" % (status,))
 
 
+
+_DEAD_JOB = "https://work.mercor.com/jobs/list_DOESNOTEXIST000000/nope"
+
+
+def _scraper_api_run(api_status, api_json, extra_argv=()):
+    """The REAL scraper_api_client from argv to exit code, with only
+    `requests.post` stubbed. No network, no key spent."""
+    import scraper_api_client as sac
+    out = os.path.join(tempfile.mkdtemp(), "o")
+
+    class _Resp:
+        status_code = api_status
+        headers = {}
+        text = json.dumps(api_json)
+
+        def json(self):
+            return api_json
+
+    real = (sac.requests.post, sys.argv, sac.env_config.apply)
+    sac.requests.post = lambda url, **kw: _Resp()
+    sac.env_config.apply = lambda a, **k: None
+    sys.argv = ["scraper_api_client.py", "--key", "k" * 8, "--mode", "job",
+                "--url", _DEAD_JOB, "--format", "json", "--out", out,
+                "--retries", "0", "--retry-delay", "0"] + list(extra_argv)
+    try:
+        with contextlib.redirect_stdout(io.StringIO()):
+            code = sac.main()
+    finally:
+        sac.requests.post, sys.argv, sac.env_config.apply = real
+    meta_path = out + ".meta.json"
+    meta = (json.load(open(meta_path, encoding="utf-8"))
+            if os.path.exists(meta_path) else None)
+    return code, meta
+
+
+def _playwright_run_on(status, html, argv):
+    """The REAL Playwright `scrape()` with the browser stubbed at goto()."""
+    import types
+    engine = _import_engine("playwright_scraper")
+    if engine is None:
+        return None
+    out = os.path.join(tempfile.mkdtemp(), "o")
+    saved = (sys.argv, engine.env_config.apply, engine._BrowserSession,
+             engine.sync_playwright)
+    sys.argv = ["playwright_scraper.py"] + list(argv) + [
+        "--out", out, "--format", "json", "--delay", "0",
+        "--retry-delay", "0", "--retries", "1"]
+    engine.env_config.apply = lambda a: None
+    try:
+        args = engine.parse_args()
+
+        class _Page:
+            url = argv[argv.index("--url") + 1]
+            def goto(self, u, **k):
+                return types.SimpleNamespace(status=status)
+            def content(self):
+                return html
+            def evaluate(self, *a, **k):
+                return {}
+            def query_selector_all(self, sel):
+                return []
+            def wait_for_timeout(self, ms):
+                pass
+            def screenshot(self, **k):
+                pass
+
+        class _Session:
+            def __init__(self, *a, **k):
+                self.page, self.pool = _Page(), None
+            def open(self):
+                return self
+            def close(self):
+                pass
+            def relaunch(self):
+                pass
+
+        class _PW:
+            def __enter__(self):
+                return None
+            def __exit__(self, *a):
+                return False
+
+        engine._BrowserSession = _Session
+        engine.sync_playwright = lambda: _PW()
+        with contextlib.redirect_stdout(io.StringIO()):
+            code = engine.scrape(args)
+    finally:
+        (sys.argv, engine.env_config.apply, engine._BrowserSession,
+         engine.sync_playwright) = saved
+    meta_path = out + ".meta.json"
+    meta = (json.load(open(meta_path, encoding="utf-8"))
+            if os.path.exists(meta_path) else None)
+    return code, meta
+
+
+def check_a_target_404_is_exit_4_in_the_scraper_api_client_as_in_the_browser():
+    """A Scraper API answer of HTTP 200 carrying `http_code: 404` is MERCOR's
+    404: the API documents that a site 404 "is returned with HTTP 200 from
+    the API". So a dead job is `not_found` and exit 4, the same as a browser
+    engine whose goto() saw the 404, with the same sidecar. The API's OWN
+    non-200 (its 404 is an unknown task id) is the content never obtained:
+    exit 5.
+    """
+    dead = {"status": "success", "http_code": 404, "headers": {},
+            "body": NOT_FOUND_HTML}
+    code, meta = _scraper_api_run(200, dead, ["--allow-empty"])
+    equal("scraper API: a target 404 is exit 4", code, 4)
+    check("scraper API: ...with a sidecar, as the browser engines write",
+          meta is not None, "no sidecar")
+    if meta:
+        equal("scraper API: the sidecar names the gone address",
+              meta.get("urls_not_found"), [_DEAD_JOB])
+    code, meta_no_flag = _scraper_api_run(200, dead)
+    equal("scraper API: a target 404 without --allow-empty is still exit 4",
+          code, 4)
+    check("...and writes no sidecar over earlier output", meta_no_flag is None)
+
+    # The status decides it, not the body: the same bytes under 200 are
+    # not `not_found`, so a client that dropped `http_code` cannot pass.
+    code, _ = _scraper_api_run(200, dict(dead, http_code=200), ["--allow-empty"])
+    check("scraper API: the 404 body under a 200 is NOT exit 4", code != 4,
+          "exit %s" % code)
+
+    # The API's own refusals: the content was never obtained.
+    for api_status, body in ((404, {"error": "Not found"}),
+                             (422, {"error": "task failed"}),
+                             (402, {"error": "insufficient balance"})):
+        code, _ = _scraper_api_run(api_status, body, ["--allow-empty"])
+        equal("scraper API: API HTTP %d is exit 5" % api_status, code, 5)
+
+    got = _playwright_run_on(404, NOT_FOUND_HTML,
+                             ["--mode", "job", "--url", _DEAD_JOB, "--allow-empty"])
+    if got is None:
+        return
+    pw_code, pw_meta = got
+    equal("playwright: the same target 404 is exit 4", pw_code, 4)
+    if meta and pw_meta:
+        for key in ("status", "stop_reason", "pages_completed", "pages_failed",
+                    "urls_not_found", "jobs_not_found"):
+            equal("the API client and Playwright agree on %s" % key,
+                  meta.get(key), pw_meta.get(key))
+
 def check_no_engine_branches_on_a_mode_that_does_not_exist():
     """No engine may branch on a mode this repo does not have.
 
