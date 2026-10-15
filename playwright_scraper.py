@@ -131,21 +131,20 @@ class PageOutcome:
     load_failed: bool = False
     # The page_flow state this page came back as ("content", "blocked",
     # "challenge", "empty", "unknown"). Carried so the caller can tell an
-    # EMPTY page — a /p/<slug> hub, a no-match query, or one page past the
-    # end of a listing — from a page that failed. Both produce zero rows and
+    # EMPTY page — an index or careers payload holding no records — from a
+    # page that failed. Both produce zero rows and
     # they mean opposite things.
     state: Optional[str] = None
     # What this response said about itself. Mercor publishes no catalogue
     # total on any route, so unlike a site that states `totalResults` these
     # are counts of what ARRIVED rather than claims about the catalogue —
-    # and saying so is the difference between "complete" and "exhaustive"
-    # (CLAUDE.md §21).
+    # and saying so is the difference between "complete" and "exhaustive".
     #
     # `total_available` holds the number of records in the payload.
     # `urls_in_itemlist` holds the number the same response's ItemList
     # JSON-LD indexes, which was SMALLER on 2026-09-18 (326 against 390).
     # Carrying both means every run records the gap instead of a reader
-    # inheriting the figure from a comment (§13).
+    # inheriting the figure from a comment.
     total_available: Optional[int] = None
     total_companies: Optional[int] = None
     pages_available: Optional[int] = None
@@ -222,7 +221,7 @@ def _driver(page):
     # than forgotten: Mercor serialises its whole result set into
     # `__NEXT_DATA__` in the first response. All 390 listing records are in
     # the document before any scrolling could happen, so a scroll would be
-    # ceremony that looks load-bearing (CLAUDE.md §4).
+    # ceremony that looks load-bearing.
     #
     # The grid is in fact VIRTUALISED — the live DOM holds 16 job anchors
     # for 390 records and scrolling would paint more of them — which makes
@@ -510,8 +509,8 @@ def _launch_local(pw, args, pool):
     # navigation: Cloudflare calls `turnstile.render(container, params)` once
     # and keeps nothing, so `sitekey`, `action`, `cData` and `chlPageData`
     # exist only inside that call. A static read of a challenge page — any
-    # static read, however careful — cannot produce a solvable task
-    # (CLAUDE.md §19). It costs nothing on a page that never renders one.
+    # static read, however careful — cannot produce a solvable task.
+    # It costs nothing on a page that never renders one.
     context.add_init_script(TURNSTILE_INTERCEPT_JS)
     return browser, context, context.new_page()
 
@@ -725,7 +724,7 @@ def _snapshot(page, url: str) -> Optional[str]:
     return _content_when_settled(page)
 
 
-def handle_captcha_if_present(page, args) -> bool:
+def handle_captcha_if_present(page, args, on_purchase=None) -> bool:
     """Detect and solve a challenge. True if something was solved.
 
     Runs after EVERY navigation, for ANY page — not scoped to one URL. The
@@ -734,7 +733,7 @@ def handle_captcha_if_present(page, args) -> bool:
     about the variant and the parameters for one are rejected for the other.
 
     WHAT THIS SITE ACTUALLY PUTS IN FRONT OF A RUN, measured 2026-09-18,
-    because CLAUDE.md §19 is explicit that a sentence about what a solver
+    because a sentence about what a solver
     can do is the most expensive thing this family can get wrong:
 
     * Cloudflare's **managed challenge**. Mercor sits behind Cloudflare and
@@ -758,13 +757,13 @@ def handle_captcha_if_present(page, args) -> bool:
 
       It is invisible to a CAPTURE. The sitekey appears in no served HTML
       and in none of the eagerly-loaded JS chunks — it arrives in a lazily
-      loaded bundle — so CLAUDE.md §18's "grep a good page for the site's
+      loaded bundle — so the usual "grep a good page for the site's
       own captcha config" finds nothing on this site. Only a real browser
-      reveals it. That is a new shape of §18's lesson and it is why this
+      reveals it. That is a new shape of an old lesson and it is why this
       block says what it does rather than "no captcha configured".
 
-      And it never blocks. A v3 widget renders no challenge frame at all
-      (§19); it scores the session in the background and Mercor served all
+      And it never blocks. A v3 widget renders no challenge frame at all;
+      it scores the session in the background and Mercor served all
       390 rows alongside it. So it must never be paid for on a page that
       has content, which is exactly what the `already_rendered` gate below
       is for — see the note there about what a wrong readiness selector
@@ -825,9 +824,10 @@ def handle_captcha_if_present(page, args) -> bool:
         # solve". With an API key set that is a charge per page, for a
         # score-based widget that was never stopping anything.
         #
-        # CLAUDE.md §18 states the rule for the PARSER's marker set; this is
-        # the same rule applied to the SOLVER's — and the reminder that a
-        # gate is only as good as the selector it counts with.
+        # The parser's marker set follows a rule (count a marker on a page
+        # you know is good before trusting it); this is the same rule
+        # applied to the SOLVER's — and the reminder that a gate is only as
+        # good as the selector it counts with.
         if challenge is None and already_rendered <= MIN_CARD_MATCHES:
             challenge = detect_turnstile(html, page.url)
         if challenge and not challenge.sitekey:
@@ -841,7 +841,7 @@ def handle_captcha_if_present(page, args) -> bool:
                             "publishes one in its own config — using it.")
             else:
                 # Raising a task without a sitekey buys a rejected token and
-                # an ERROR_CAPTCHA_UNSOLVABLE bill (CLAUDE.md §19). Say so
+                # an ERROR_CAPTCHA_UNSOLVABLE bill. Say so
                 # instead.
                 logger.warning(
                     "A Cloudflare Turnstile is on this page but no sitekey "
@@ -868,6 +868,11 @@ def handle_captcha_if_present(page, args) -> bool:
                        "solved — continuing with whatever the page already "
                        "holds.")
         return False
+    if on_purchase is not None:
+        # Counted HERE, at the one moment money is committed, rather than by
+        # the caller before it knows whether anything will be bought: a call
+        # that found no challenge must not spend the page's allowance.
+        on_purchase()
     try:
         token = solve_recaptcha(challenge, args.twocaptcha_key,
                                api_version=args.captcha_api,
@@ -937,7 +942,7 @@ def _solve_budget(args, spent: int):
     only the SECOND call was counted.
 
     INHERITED EVIDENCE, from a SIBLING repo and not from Mercor — labelled
-    because §13 says a number you inherited is not a number you measured,
+    because a number you inherited is not a number you measured,
     and this one cannot be reproduced here: Mercor has never rendered a
     challenge to this scraper, so no page of this site has ever bought a
     solve at all.
@@ -946,7 +951,7 @@ def _solve_budget(args, spent: int):
     challenge on every fetch (2026-09-17): ONE page bought THREE Turnstile
     solves — two from the uncounted call across two block attempts, one from
     the counted one — and every token was refused. The cap read as enforced
-    and was not (CLAUDE.md §17: a policy constant nothing reads is the same
+    and was not (a policy constant nothing reads is the same
     defect as dead code).
 
     The fix is carried here anyway. A budget that is never exercised is
@@ -1049,8 +1054,11 @@ def _fetch_one_page(session, args, pool, page_num: int, url: str) -> PageOutcome
 
         # Counted, because it can BUY. See _solve_budget.
         if _solve_budget(args, solves_bought):
-            solves_bought += 1
-            if handle_captcha_if_present(session.page, args):
+            bought = []
+            solved = handle_captcha_if_present(
+                session.page, args, on_purchase=lambda: bought.append(1))
+            solves_bought += len(bought)
+            if solved:
                 # A solve navigated the page. Give the destination a moment
                 # before judging what came back.
                 session.page.wait_for_timeout(1000)
@@ -1098,11 +1106,14 @@ def _fetch_one_page(session, args, pool, page_num: int, url: str) -> PageOutcome
         # `TURNSTILE_INTERCEPT_JS` has captured its parameters. It is bounded
         # by SOLVES_PER_PAGE so a rotation loop cannot become a bill, and a
         # sitekey-less detection refuses to build a task at all rather than
-        # paying for one the API will reject (CLAUDE.md §19).
+        # paying for one the API will reject.
         if (page_flow.should_solve(state)
                 and _solve_budget(args, solves_bought)):
-            solves_bought += 1
-            if handle_captcha_if_present(session.page, args):
+            bought = []
+            solved = handle_captcha_if_present(
+                session.page, args, on_purchase=lambda: bought.append(1))
+            solves_bought += len(bought)
+            if solved:
                 session.page.wait_for_timeout(1000)
                 html = _snapshot(session.page, url) or html
                 state = _classify(session.page, html, status=http_status, mode=args.mode)
@@ -1119,8 +1130,8 @@ def _fetch_one_page(session, args, pool, page_num: int, url: str) -> PageOutcome
 
         if not page_flow.should_retry(state):
             # "content" and "empty" are both final answers. An empty page is
-            # a CORRECT one — a hub category has no grid, and one page past
-            # the end of a listing has no products — so retrying it would
+            # a CORRECT one — a payload with no records in it is what the site
+            # holds right now — so retrying it would
             # spend the user's budget re-confirming the same right answer,
             # and rotating the exit would blame an address for the URL it was
             # given.
@@ -1155,7 +1166,7 @@ def _fetch_one_page(session, args, pool, page_num: int, url: str) -> PageOutcome
                 time.sleep(pause)
 
     if load_failed:
-        # NAME the proxy when it was the proxy. CLAUDE.md §8: a dead exit and
+        # NAME the proxy when it was the proxy. A dead exit and
         # a timeout want opposite responses — another try at the same exit
         # versus a different exit — so a message that cannot tell them apart
         # leaves the reader guessing which they got.
@@ -1224,7 +1235,7 @@ def _fetch_one_page(session, args, pool, page_num: int, url: str) -> PageOutcome
     # Mercor embeds the whole result set in the first response, so there is
     # nothing to wait for and nothing to scroll into view. Porting the
     # sibling repos' scroll loop here would be dead code that looks
-    # load-bearing (CLAUDE.md §4) — and worse than usual on this site,
+    # load-bearing — and worse than usual on this site,
     # because the grid is virtualised: scrolling paints more DOM nodes and
     # produces not one extra row.
 
@@ -1247,10 +1258,10 @@ def _fetch_one_page(session, args, pool, page_num: int, url: str) -> PageOutcome
     # is the "detected is not blocking" rule the captcha default follows,
     # applied to the blocking decision instead of the spending one. But
     # `state != "content"` is still too wide: an EMPTY page is a correct
-    # answer, and a live run of a /p/<slug> hub reported exit 3 on a 191 KB
-    # page the site had plainly served, because the hub's own performance
-    # script names `akamaihd.net` and "akamai" was in the marker list. Both
-    # halves were wrong; the marker is gone (see
+    # answer, and a sibling repo once reported exit 3 on a 191 KB page its
+    # site had plainly served, because the site's own performance script
+    # named its CDN and that vendor was in the marker list. Both halves were
+    # wrong; the marker is gone (see
     # product_parser.BOT_CHALLENGE_MARKERS) and this now only refines the
     # REASON for a page the policy had already given up on.
     vendor = (detect_bot_challenge(html, url=session.page.url)
@@ -1491,7 +1502,7 @@ def scrape(args) -> int:
     # parameter tried on `/explore` (?page, ?limit, ?offset, ?domain)
     # returned a byte-identical payload on 2026-09-18. So one fetch really
     # is the whole route, and treating either as paginated would report a
-    # complete multi-page run holding one page several times (§18).
+    # complete multi-page run holding one page several times.
     #
     # --mode job is the paginated mode, and its pages are job URLs from the
     # enumeration rather than a `?page=N` convention — so there is no
@@ -1519,7 +1530,7 @@ def scrape(args) -> int:
             # worker would have nothing to do. `job` is the mode that CAN
             # use them: every page is an independent job URL read from the
             # enumeration, which is precisely what the concurrency machinery
-            # wants (§7).
+            # wants.
             logger.info("--concurrency is ignored in --mode %s: the route "
                         "holds its whole result set in one response, so "
                         "there is a single page to fetch. --mode job is the "
@@ -1570,7 +1581,7 @@ def scrape(args) -> int:
                 if not job_urls:
                     # Nothing to fetch, so nothing is written — `save`
                     # leaves the previous run's good output in place and
-                    # no sidecar contradicts it (CLAUDE.md §9).
+                    # no sidecar contradicts it.
                     return finish_run(
                         [], args.out, args.format, args.allow_empty,
                         blocked=False, stop_reason="enumeration_empty",
@@ -1728,10 +1739,10 @@ def scrape(args) -> int:
 
     # Completeness, checked over the MERGED result rather than per page — a
     # per-page check cannot see a gap BETWEEN two pages, which is exactly
-    # where a short page hides (CLAUDE.md §8).
+    # where a short page hides.
     #
-    # What "complete" can honestly mean differs by mode here, and CLAUDE.md
-    # §21's "complete and exhaustive are different words" is the whole point:
+    # What "complete" can honestly mean differs by mode here, and
+    # "complete and exhaustive are different words" is the whole point:
     #
     #   listings  One response, and that IS the whole route — the run is
     #             genuinely complete. It is also a 390-of-462 SLICE of what
@@ -1750,8 +1761,8 @@ def scrape(args) -> int:
 
     if args.mode == "listings" and all_rows:
         if indexed is not None:
-            # Reported every run rather than inherited from a docstring
-            # (§13). The ItemList was the SMALLER view on 2026-09-18 — 326
+            # Reported every run rather than inherited from a docstring.
+            # The ItemList was the SMALLER view on 2026-09-18 — 326
             # against 390 — and an inversion would mean the primary source
             # had started dropping rows.
             logger.info("This response held %d listing(s); its own ItemList "
@@ -1784,7 +1795,7 @@ def scrape(args) -> int:
     # Mercor states no catalogue total on any route, so unlike a site that
     # publishes `totalResults` there is no figure to copy. What goes here is
     # this run's OWN arithmetic about how much of the site it covered —
-    # which is what a bare "complete" hides (§21), and what stops a reader
+    # which is what a bare "complete" hides, and what stops a reader
     # of the file inheriting a number from a README that was measured on
     # some other day.
     extra = {"route_is_paginated": args.mode == "job", "mode": args.mode}
@@ -1885,9 +1896,9 @@ def parse_args():
     p.add_argument("--out", default="mercor_jobs", help="Output file prefix")
     p.add_argument("--locale", default="en-US",
                    help="Browser locale (default en-US). It does NOT decide "
-                        "which directory is searched — that is find_country "
-                        "in the URL, or --country — so this only affects what "
-                        "the browser claims about itself.")
+                        "which route is read — that is --mode, or --url — so "
+                        "this only affects what the browser claims about "
+                        "itself.")
     p.add_argument("--proxy", default=None,
                    help="Proxy URL, e.g. http://ACCOUNT:PASSWORD@HOST:9999 "
                         "(2captcha.com/proxy)")
@@ -1971,9 +1982,17 @@ def parse_args():
     p.add_argument("--headless", action="store_true", default=True)
     p.add_argument("--headful", dest="headless", action="store_false")
     args = p.parse_args()
+    # Whether --url was TYPED, captured before the environment fills it. A
+    # MERCOR_URL from .env is a default, not a request: a user who copied the
+    # example and typed `--mode careers` must not be told their URL
+    # disagrees with their mode when they never gave one.
+    typed_url = args.url
     # Fill --twocaptcha-key / --cdp-endpoint / --proxy / --url from the
     # environment or .env when the flag was not given. An explicit flag wins.
     env_config.apply(args)
+    bad_number = page_flow.numeric_flag_error(args)
+    if bad_number:
+        p.error(bad_number)
 
     # Every mode has a correct default URL, so unlike the sibling repo this
     # engine was ported from there is nothing to refuse here and no pair of
@@ -1986,11 +2005,19 @@ def parse_args():
         if not ok:
             p.error(why)
         implied = mode_for_url(args.url)
-        if implied and implied != args.mode:
+        if implied and implied != args.mode and not typed_url:
+            # The URL came from the environment and names another route.
+            # --mode is what the user asked for, so it wins and the mode's
+            # own default address is used.
+            print("[i] MERCOR_URL (%s) is read by --mode %s; ignoring it for "
+                  "--mode %s and using that mode's default address."
+                  % (args.url, implied, args.mode), file=sys.stderr)
+            args.url = None
+        elif implied and implied != args.mode:
             # Refused rather than silently corrected. Reading a careers URL
             # under --mode listings would parse it with the wrong reader and
             # report zero rows for a perfectly good page — the failure
-            # CLAUDE.md §20 describes, where a served page that parses to
+            # where a served page that parses to
             # nothing sends the reader to check the URL instead of the code.
             p.error("--url is a %s URL but --mode is %s. %s is read by "
                     "--mode %s; pass that, or drop --url and let --mode %s "

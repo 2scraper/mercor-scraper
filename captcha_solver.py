@@ -20,7 +20,7 @@ came back from `curl`, from `python-requests` and from an EMPTY
 User-Agent, and twelve rapid sequential detail fetches were all 200 at about
 0.4s each. No challenge has ever been rendered to this scraper.
 
-But "no challenge rendered" is NOT "no captcha configured" (CLAUDE.md §18),
+But "no challenge rendered" is NOT "no captcha configured",
 and on this site that distinction has teeth:
 
   * **The MARKETPLACE host runs invisible reCAPTCHA Enterprise; the
@@ -47,18 +47,18 @@ and on this site that distinction has teeth:
     `detect_recaptcha_in_page` classifies it as — but a v2-invisible that
     never challenged is indistinguishable from outside. Nothing depends on
     it here because no solve is attempted; it matters to anyone who starts
-    solving, since §8 is explicit that v3 parameters sent for a
+    solving, since v3 parameters sent for a
     v2-invisible widget buy a token the site rejects. Settle it against a
     real challenge before building a task.
 
     What makes it worth this paragraph is where it is NOT: the sitekey
     appears in no served HTML and in none of the eagerly-loaded JS chunks.
-    It arrives in a lazily-loaded bundle. So §18's advice to "grep a good
+    It arrives in a lazily-loaded bundle. So the usual advice to "grep a good
     page for the site's own captcha config" — a `*_SITE_KEY`, a
     `<captcha-*>` element, a `data-sitekey` — returns nothing on this site,
     and a reader working from `--dump-html` alone would conclude no captcha
     is configured. Only a real browser reveals it. That is a new shape of
-    the §18 lesson and the reason it is recorded here rather than left to
+    the lesson and the reason it is recorded here rather than left to
     be rediscovered.
 
   * **Cloudflare fronts the site and has never challenged it.** Every page
@@ -79,7 +79,7 @@ be solved". 2captcha solves Cloudflare Turnstile
 (`TurnstileTaskProxyless`), enterprise reCAPTCHA
 (`RecaptchaV2EnterpriseTaskProxyless`) and ordinary v2/v3, and this module
 builds all of them. The only sentence this repo is entitled to is which task
-types it implements (CLAUDE.md §19).
+types it implements.
 
 PROVENANCE OF THE FIGURES BELOW
 -------------------------------
@@ -887,8 +887,8 @@ def solve_recaptcha(challenge: CaptchaChallenge, twocaptcha_api_key: Optional[st
                      api_version: str = "v2", min_score: float = 0.7) -> str:
     """Public entry point: solve `challenge` through 2captcha and return the token.
 
-    There used to be a `use_antidetect` branch here, behind a CLI flag of the
-    same name, that POSTed to a hardcoded local "solve-captcha" endpoint.
+    There used to be a second branch here, behind a CLI flag that has since
+    been removed, that POSTed to a hardcoded local "solve-captcha" endpoint.
     It was removed before publishing: that endpoint was a placeholder for a
     product that does not exist under that name, so the flag could not work for
     anyone who set it, and the real "the browser solves it for you" path is

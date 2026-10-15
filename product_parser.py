@@ -3,7 +3,7 @@ product_parser.py
 -----------------
 Everything this repo knows about Mercor. The engines are site-agnostic apart
 from a handful of named constants; if you are adding site knowledge anywhere
-else, it belongs here (CLAUDE.md §1).
+else, it belongs here.
 
 What Mercor publishes, and where
 --------------------------------
@@ -20,11 +20,11 @@ enrich a `listings` run and what `diff_runs.py` joins on. The third is a
 different population entirely: salaried employment at Mercor the company,
 served off a different host out of the Ashby ATS, with its own id space. It
 shares the row shape and nothing else, so `diff_runs.py` refuses to compare
-a careers run against a marketplace one (CLAUDE.md §9).
+a careers run against a marketplace one.
 
 The structured source is the React Query cache, NOT the JSON-LD
 --------------------------------------------------------------
-CLAUDE.md §15 step 2 says to count the JSON-LD blocks before writing a line.
+Count the JSON-LD blocks before writing a line.
 Counted on the 2026-09-18 captures, `/explore` carries three — a
 `BreadcrumbList`, an `Organization`, and an `ItemList` of 46 KB. The
 `ItemList` looks like the primary path and is the wrong one twice over:
@@ -35,8 +35,7 @@ Counted on the 2026-09-18 captures, `/explore` carries three — a
   * it is **incomplete**. 326 URLs against 390 records in the same
     response's `__NEXT_DATA__`, and the 64 it drops are not random: all 55
     `evergreen` listings plus 9 standard ones. Anchoring on it silently
-    loses 16% of the catalogue, which is §8's "fail loudly" failing
-    quietly.
+    loses 16% of the catalogue, which is "fail loudly" failing quietly.
 
 So the primary path is the Next.js `__NEXT_DATA__` payload, specifically the
 dehydrated React Query cache at
@@ -74,8 +73,8 @@ Three sitemap-only listings were fetched to check what they were, and all
 three answered 200 with `role.status == "active"`: they are live jobs that
 `/explore` simply does not show. So `--mode job` enumerates the UNION and
 says so in the sidecar, and a `listings` run is honest about being a
-390-of-462 slice. This is CLAUDE.md §21's "complete and exhaustive are
-different words", with the twist that here neither source is the superset.
+390-of-462 slice. Complete and exhaustive are
+different words, with the twist that here neither source is the superset.
 
 `/explore` has no pagination at all
 -----------------------------------
@@ -85,7 +84,7 @@ payload (the only size difference is the query string echoed back into the
 canonical `<link>`). The route ships the entire set in one response. So
 `page_url()` refuses to build a page URL for it rather than manufacturing
 duplicates and reporting a complete multi-page run holding page 1 several
-times (§7, §18).
+times.
 
 In `--mode job` a "page" IS one job detail page. That is not a stretch of
 the flag: a job URL is the unit this site addresses independently, it is
@@ -109,7 +108,7 @@ Traps that cost time here
 * **21 of the record's 50 fields are constant across all 390 listings**
   and are not carried: `matchQuality`, `submittedOn`, `userSimilarityScore`,
   `applicationStepsCompleted` and the rest are logged-in personalisation
-  that an anonymous fetch always sees as null or zero. §9 — a column null
+  that an anonymous fetch always sees as null or zero. A column null
   on every row of every run should not exist. The measurement is here so
   someone can add one back with a better one.
 * **Currency is measured, not assumed.** USD on 40 of 40 sampled
@@ -128,22 +127,22 @@ sequential detail fetches were all 200 at ~0.4s each. Mercor is not gated,
 at least from a Hetzner datacentre address (AS24940, Helsinki) on that date.
 
 `BOT_CHALLENGE_MARKERS` is therefore deliberately SHORT rather than
-deliberately broad. Per §18 a marker that fires on a page the site plainly
-served is worse than no marker, and per §8/§19 `cf-turnstile` is measured
+deliberately broad. A marker that fires on a page the site plainly
+served is worse than no marker, and `cf-turnstile` is measured
 useless in any repo that can reach the Scraping Browser, whose auto-solve
 extension injects it into every page it loads. It is not here.
 
 And the positive-asset trick does NOT work on this site
 -------------------------------------------------------
-CLAUDE.md §8 and §18 recommend "was this built out of the site's own
-assets?" as the structural signal, proven on two other sites. Counted here
+Sibling repos use "was this built out of the site's own assets?" as the
+structural signal, proven on two other sites. Counted here
 it is **backwards**: `/_next/static` appears 23-27 times on every real page
 and **32 times on the 404**, because Mercor's not-found page is the same
 Next.js app. A threshold on it would classify the one page that is
 genuinely not content as the most content-like page on the site.
 
-What works instead is an unambiguous positive signal, which §17 says to
-check before any heuristic anyway: **a real page carries `__NEXT_DATA__`
+What works instead is an unambiguous positive signal, which belongs
+before any heuristic anyway: **a real page carries `__NEXT_DATA__`
 and the 404 carries none at all**. `references_own_assets` is kept for the
 engines' interface and is documented as the weak signal it is here.
 """
@@ -176,7 +175,7 @@ CORPORATE_HOST = "www.mercor.com"
 HOSTS = (MARKETPLACE_HOST, CORPORATE_HOST, "mercor.com")
 
 # `mercor.com` and `www.mercor.com` both answer; the bare host 301s to the
-# `www.` one. Unlike MediaMarkt (CLAUDE.md §5) there is no host here that
+# `www.` one. Unlike MediaMarkt there is no host here that
 # refuses a `www.` prefix, so a rebuilt URL always matches the page's own.
 _HOST_ALIASES = {"mercor.com": CORPORATE_HOST}
 
@@ -194,8 +193,8 @@ DEFAULT_MODE = "listings"
 
 # `/jobs/list_XXXX/some-slug`. The id is the contract — the slug is
 # cosmetic and the site serves the page with any slug, or none. Anchoring
-# on the URL pattern rather than on a CSS class is §4: Mercor's classes are
-# build-generated Tailwind strings that churn on every deploy.
+# on the URL pattern rather than on a CSS class is deliberate: Mercor's
+# classes are build-generated Tailwind strings that churn on every deploy.
 _JOB_DETAIL_RE = re.compile(
     r"^/jobs/(?P<id>list_[A-Za-z0-9_-]+)(?:/(?P<slug>[^/?#]*))?/?$", re.I)
 _EXPLORE_RE = re.compile(r"^/explore/?$", re.I)
@@ -230,8 +229,7 @@ _HOST_BY_ROUTE = {
 #
 # Everything below reads a JSON payload rather than markup, so the usual
 # job is turning a JSON value into a column value without inventing one.
-# `None` in, `None` out, always: CLAUDE.md §8, never present a guess as a
-# fact.
+# `None` in, `None` out, always: never present a guess as a fact.
 # ---------------------------------------------------------------------------
 
 def _str_or_none(value: Any) -> Optional[str]:
@@ -363,7 +361,7 @@ def route_of(url: str) -> Optional[str]:
 def is_supported_url(url: str) -> Tuple[bool, str]:
     """(ok, reason). The reason is shown to the user, so it names the cause.
 
-    CLAUDE.md §5: refuse WITH THE REASON. "is not a Mercor URL" is false for
+    Refuse WITH THE REASON. "is not a Mercor URL" is false for
     `work.mercor.com/login` and sends the reader hunting for a typo in a URL
     that is spelled correctly.
     """
@@ -414,7 +412,7 @@ def page_url(url: str, page: int) -> Optional[str]:
     payload. The route ships all 390 records in one response and has no
     second page to address.
 
-    CLAUDE.md §18 is explicit about what building one anyway would cost: the
+    Building one anyway would cost this: the
     engine would fetch the same rows again, find no new `sku`, conclude the
     listing was exhausted and report a COMPLETE multi-page run holding page
     one several times. A caller that gets None here plans one page and says
@@ -445,7 +443,7 @@ def job_url(listing_id: Any, slug: Optional[str] = None) -> Optional[str]:
 # NO `explore_url()` / `careers_url()` helpers here, and their absence is a
 # removal rather than an omission. Both existed and only returned
 # `EXPLORE_URL` / `CAREERS_URL` — module constants every caller already
-# imports directly — so nothing ever called either. CLAUDE.md §17: a
+# imports directly — so nothing ever called either. A
 # wrapper that only delegates is the same defect as dead code, and harder
 # to see, because it reads like an API.
 #
@@ -533,10 +531,10 @@ def jsonld_blocks(html: str) -> List[Any]:
 def _ld_of_type(html: str, wanted: str) -> Optional[Dict[str, Any]]:
     """The first JSON-LD node of `@type`, looking inside lists and `@graph`.
 
-    All three shapes are legal schema.org and CLAUDE.md §4 lists them as
-    things that break a naive parser. A top-level list and an `@graph`
-    wrapper both appear in the wild even where this site does not currently
-    use them, and handling them costs four lines.
+    All three shapes are legal schema.org and all three break a naive
+    parser. A top-level list and an `@graph` wrapper both appear in the
+    wild even where this site does not currently use them, and handling
+    them costs four lines.
     """
     for block in jsonld_blocks(html):
         candidates: List[Any] = []
@@ -700,7 +698,7 @@ def role_from_next_data(payload: Any) -> Tuple[Optional[Dict[str, Any]], Optiona
     All three were empty but `role` across the 2026-09-18 captures, so the
     other two are unverified against a real page and are read defensively:
     the kind is recorded in the row's `status` only when the record does
-    not state one itself, so a guess never overwrites a fact (§8).
+    not state one itself, so a guess never overwrites a fact.
     """
     if not isinstance(payload, dict):
         return None, None
@@ -740,7 +738,7 @@ def is_known_rate_period(value: Any) -> bool:
 
     This exists so `RATE_PERIODS` has a READER. A constant carrying a
     measurement and consulted by nothing is the same defect as dead code —
-    it reads like enforcement and enforces nothing (CLAUDE.md §17), and
+    it reads like enforcement and enforces nothing, and
     this one was exactly that until the pre-publication grep found it.
 
     It does not gate anything: an unknown period is passed through to the
@@ -784,7 +782,7 @@ def careers_salary(compensation: Any, *, may_display: Any = None
     a range spanning two currencies is not a range.
 
     `may_display` is Ashby's `shouldDisplayCompensationOnJobPostings`, and
-    it is the AUTHORITY rather than a hint — CLAUDE.md §21: where a site
+    it is the AUTHORITY rather than a hint: where a site
     publishes a should-I-show-this flag, use it rather than inferring from
     the value. False means the site is withholding the figure, so the pay
     columns are null whatever the tiers happen to contain.
@@ -865,7 +863,7 @@ def jsonld_currency(node: Optional[Dict[str, Any]]) -> Optional[str]:
     currency field anywhere. Measured USD on 40 of 40 randomly sampled
     detail pages on 2026-09-18 — which is a measurement and not a licence
     to default, so a page without a `baseSalary` node yields None and the
-    row's `rate_currency` stays null (§4: absent is null, never a defaulted
+    row's `rate_currency` stays null (absent is null, never a defaulted
     "USD").
 
     Note the node is NOT read for the rate itself. Its `value.unitText` said
@@ -897,7 +895,7 @@ def _row_from_listing(record: Dict[str, Any], *, page: Optional[int] = None,
     does not are `listingDomain`, `postedAt`, `remainingSlots`,
     `suppliedSlots` and `recentCandidatesCount`; the detail route has six
     this one does not. Neither is a subset of the other, which is why
-    `data_source` is a column and not a sidecar field (§8).
+    `data_source` is a column and not a sidecar field.
     """
     ident = _str_or_none(record.get("listingId"))
     if not ident:
@@ -922,7 +920,7 @@ def _row_from_listing(record: Dict[str, Any], *, page: Optional[int] = None,
         # Deliberately null. The marketplace's listing payload states no
         # currency anywhere; only a detail page's JSON-LD does. Writing
         # "USD" here because 40 sampled detail pages said USD would be
-        # presenting a guess as a fact (§8).
+        # presenting a guess as a fact.
         rate_currency=None,
         rate_period=_str_or_none(record.get("payRateFrequency")),
         hours_per_week=_int_or_none(record.get("hoursPerWeek")),
@@ -936,9 +934,9 @@ def _row_from_listing(record: Dict[str, Any], *, page: Optional[int] = None,
         # 99, and it is the site telling you which company names it is
         # willing to show. Kept as a column because a null `company_name`
         # beside `company_brand_visible=False` is "withheld", while a null
-        # beside True would be "not set" — CLAUDE.md §21's "where a site
+        # beside True would be "not set" — where a site
         # publishes a should-I-show-this flag, use it rather than inferring
-        # from the value".
+        # from the value.
         company_brand_visible=_bool_or_none(record.get("companyBrandVisible")),
         referral_amount=_float_or_none(record.get("referralAmount")),
         posted_at=_iso(record.get("postedAt")),
@@ -961,8 +959,8 @@ def _row_from_role(record: Dict[str, Any], *, url: str = "",
     `data_source="detail"`. Checked field by field against the same job's
     `/explore` record on 2026-09-18: **zero disagreements** on the 37
     fields both publish. So no reconciliation overlay is needed here, and
-    porting one from a shop repo would be exactly the dead code CLAUDE.md
-    §4 warns about. What the detail page adds is `companyWebsite`,
+    porting one from a shop repo would be exactly the dead code that
+    looks load-bearing. What the detail page adds is `companyWebsite`,
     `companyDescription`, `availableSpots` and `activeContractorsCount`;
     what it drops is `listingDomain`, `postedAt` and the slot counters.
     """
@@ -1101,7 +1099,7 @@ class ListingPage:
     response has of itself, and the gap between them (390 against 326 on
     2026-09-18) is the measurement that justifies reading the React Query
     cache instead of the JSON-LD. A run RECORDS both rather than a later
-    reader inheriting the figure from a docstring (CLAUDE.md §13).
+    reader inheriting the figure from a docstring.
     """
 
     rows: List[JobPosting] = field(default_factory=list)
@@ -1133,8 +1131,8 @@ def parse_listing_page(html: str, *, url: str = "", page: Optional[int] = None,
                        scraped_at: Optional[str] = None) -> ListingPage:
     """Rows from `/explore`, plus what the response says about itself.
 
-    `page` is threaded in rather than defaulted, because CLAUDE.md §18 names
-    the arithmetic bug this prevents: `position` restarts at 1 on each page,
+    `page` is threaded in rather than defaulted, because of the
+    arithmetic bug this prevents: `position` restarts at 1 on each page,
     so a `page` that is 1 on every row makes `page`+`position` collide and
     the position column worthless. On this route there is only ever one
     page, and the parameter is still honoured so the invariant holds if that
@@ -1199,7 +1197,7 @@ def parse_page(html: str, *, mode: str = DEFAULT_MODE, url: str = "",
     """Dispatch to the right parser for a mode, so an engine has one call.
 
     Three engines each choosing a parser by mode is three chances to
-    disagree about which one reads what — the same argument §1 makes for
+    disagree about which one reads what — the same argument that applies to
     sharing `finish_run()` and `STATE_POLICY`.
     """
     if mode == "careers":
@@ -1215,10 +1213,10 @@ def listing_meta(html: str) -> Dict[str, Any]:
     """What a `/explore` response says about its own completeness.
 
     Mercor states no total and no page count anywhere, so unlike a site
-    that hands over `totalPages` (CLAUDE.md §21) the only arithmetic
+    that hands over `totalPages` the only arithmetic
     available is the gap between this response's two views of itself. Both
     counts go in the sidecar so a run RECORDS the gap instead of a later
-    reader inheriting a number from this docstring (§13).
+    reader inheriting a number from this docstring.
     """
     records = listings_from_html(html)
     indexed = itemlist_urls(html)
@@ -1252,14 +1250,14 @@ def listing_meta(html: str) -> Dict[str, Any]:
 # address. These are kept because a site that is ungated today may not be
 # tomorrow and a run should say "blocked" rather than "empty" when that
 # happens — but nothing here was chosen from a vendor list without counting
-# it first (§18).
+# it first.
 #
 # `cf-turnstile` is NOT here, on purpose. It is the obvious marker for a
 # Turnstile and it is measured useless in any repo that can reach the
 # Scraping Browser: 2Captcha's auto-solve extension injects
 # `data-ts-input="cf-turnstile-response"` into every page it loads, so it
 # fires on good pages, and it was absent from two real Cloudflare
-# challenges in sibling repos (§8, §19). `challenges.cloudflare.com` is the
+# challenges in sibling repos. `challenges.cloudflare.com` is the
 # one that works and it is what is carried.
 BOT_CHALLENGE_MARKERS = (
     "challenges.cloudflare.com",
@@ -1273,7 +1271,7 @@ BOT_CHALLENGE_MARKERS = (
 )
 
 # `/cdn-cgi/challenge-platform` was in this set for about an hour and is
-# NOT here now, which is the §18 check earning its keep on an eighth site.
+# NOT here now, which is the check earning its keep on an eighth site.
 # Mercor is fronted by Cloudflare, and Cloudflare injects that script into
 # ORDINARY traffic as part of bot management rather than only into a
 # challenge. Counted 2026-09-18 across seven captures — `/explore`, the
@@ -1285,7 +1283,7 @@ BOT_CHALLENGE_MARKERS = (
 #
 # The rule was already written in this file's docstring before the mistake
 # was made, and it still took running the count to catch it — which is
-# CLAUDE.md §21's closing point, that a plain measurement beats a careful
+# the general point, that a plain measurement beats a careful
 # reading. Count every candidate on a page you know is good.
 #
 # `challenges.cloudflare.com` was 0 on all seven and is kept. It is
@@ -1294,7 +1292,7 @@ BOT_CHALLENGE_MARKERS = (
 # on good pages and miss the refusals, so if Mercor ever does start
 # challenging, count it again before trusting it.
 
-# How much of a response to unescape before matching. CLAUDE.md §20: an
+# How much of a response to unescape before matching. An
 # edge's refusal page reaches a parser entity-escaped over an HTTP client
 # and plain through a browser DOM, so a literal marker matches three
 # engines and silently misses the fourth. Unescaping a BOUNDED prefix
@@ -1328,7 +1326,7 @@ def detect_bot_challenge(html: Optional[str],
     exact moment a run is already in trouble and nothing else is going
     right. No live run on this site reaches that path, because Mercor has
     never refused one, so the crash would have shipped invisibly. Found by
-    the signature-binding check (CLAUDE.md §17), which is the entire reason
+    the signature-binding check, which is the entire reason
     that check exists.
     """
     text = _normalised(html)
@@ -1347,7 +1345,7 @@ def references_own_assets(html: Optional[str], minimum: int = 1) -> bool:
 
     Kept for the engines' shared interface, and documented as the WEAK
     signal it is on this site rather than presented as the structural one.
-    CLAUDE.md §8 and §18 recommend this check on the strength of two other
+    Sibling repos rely on this check on the strength of two other
     sites, where a served page references the site's own asset host and an
     interstitial does not. Counted here on 2026-09-18 it does not
     discriminate at all:
@@ -1371,14 +1369,13 @@ def site_turnstile_sitekey(html: Optional[str]) -> Optional[str]:
 
     Nothing matched across the 2026-09-18 captures — no `data-sitekey`, no
     `*_SITE_KEY` in any page config, no `<captcha-widgets>` mount point,
-    which is the grep CLAUDE.md §18 says to run on a good page rather than
+    which is the grep to run on a good page rather than
     concluding from an absent challenge that none is configured. So this
     returns None on every page measured so far and exists for the day that
     changes.
 
     A sitekey found inside a `chrome-extension://` script tag is ignored:
-    that is the Scraping Browser's own auto-solve extension, not the site
-    (§8).
+    that is the Scraping Browser's own auto-solve extension, not the site.
     """
     if not html:
         return None
@@ -1406,7 +1403,7 @@ def site_turnstile_sitekey(html: Optional[str]) -> Optional[str]:
 #   * There is no text that does either. Counted on four live pages, the
 #     string "404" appears 1 and 2 times on the two 404s and **7 and 17
 #     times on the two GOOD pages** — so the obvious marker points the
-#     wrong way, which is §18 for the third time in this file. Every other
+#     wrong way, the third time in this file a candidate marker did. Every other
 #     candidate ("Page not found", "This page could not be found",
 #     "notFound", "next-error") was 0 on all four.
 #
@@ -1448,7 +1445,7 @@ def detect_page_state(html: Optional[str], status: Optional[int] = None,
     One of: `content`, `empty`, `not_found`, `blocked`, `parse_error`,
     `unknown`.
 
-    The ORDER here is the whole design, and it is CLAUDE.md §17's
+    The ORDER here is the whole design, and it is the
     classification-order trap stated as code: **order the signals by how
     much they prove, not by how cheap they are.** A sibling repo checked a
     threshold heuristic before an unambiguous positive signal and reported
@@ -1471,7 +1468,7 @@ def detect_page_state(html: Optional[str], status: Optional[int] = None,
     5. A page carrying no `__NEXT_DATA__` at all, under any other status,
        is `parse_error` if it is large and `unknown` if it is not. Large
        means the site sent us something substantial we could not read,
-       which §20 says is OUR bug and must be told apart from an empty
+       which is OUR bug and must be told apart from an empty
        category — reported as "0 products" it sends the reader to check
        the URL instead of the parser.
     """
@@ -1491,7 +1488,7 @@ def detect_page_state(html: Optional[str], status: Optional[int] = None,
     # An origin 404 before any marker check. A bot manager answers a
     # refused request with 403, 429 or 503 and never with 404, so a 404 is
     # the origin itself saying this route does not exist — strictly more
-    # proof than a substring, which is the ordering §17 asks for.
+    # proof than a substring, which is the right order.
     #
     # The status is the PRIMARY signal and on this site it is very nearly
     # the only one, so an engine that discards it reports a dead listing as
@@ -1520,7 +1517,7 @@ def detect_page_state(html: Optional[str], status: Optional[int] = None,
         return "empty"
 
     if len(text) > 2000:
-        # Substantial, and we could not find the payload in it. §20: a page
+        # Substantial, and we could not find the payload in it. A page
         # that was served and parses to zero rows is OUR bug, and giving it
         # its own name is what stops it reading as an empty category.
         return "parse_error"

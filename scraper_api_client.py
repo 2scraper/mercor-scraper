@@ -30,7 +30,7 @@ Chromium to install.
 
     # TWOCAPTCHA_KEY and the CDP endpoint are read from .env as
     # $MERCOR_CDP_ENDPOINT, so neither needs to be typed — a secret in
-    # argv is readable by anything that can run `ps` (CLAUDE.md §3).
+    # argv is readable by anything that can run `ps`.
 """
 
 import argparse
@@ -46,7 +46,8 @@ import requests
 
 from product_parser import (BOT_CHALLENGE_MARKERS, MODES, DEFAULT_MODE,
                             detect_bot_challenge, detect_page_state,
-                            parse_page, parse_detail)
+                            parse_page, parse_detail, is_supported_url,
+                            mode_for_url, EXPLORE_URL, CAREERS_URL)
 from output_writer import save
 import env_config
 
@@ -281,7 +282,7 @@ def _run_once(args, attempt: int = 1, attempts: int = 1) -> int:
     # from the repo it was copied from, where the row class has no
     # `category` field either — so it set an attribute that `asdict()` never
     # reads and that reached neither the JSON nor the CSV. It looked like it
-    # was labelling rows and was doing nothing at all (CLAUDE.md §16: a
+    # was labelling rows and was doing nothing at all (a
     # copied file is the one with no evidence behind it).
     #
     # `--category` labels the RUN, and the sidecar is where a run-level fact
@@ -320,8 +321,10 @@ def parse_args():
                    help="A mercor.com URL: work.mercor.com/explore with "
                         "--mode listings, www.mercor.com/careers with --mode "
                         "careers, or work.mercor.com/jobs/{id}/{slug} with "
-                        "--mode job. Required, unless MERCOR_URL is set in "
-                        "the environment or .env.")
+                        "--mode job. Needed only for --mode job: the index and "
+                        "the careers page each have one address. Defaults to "
+                        "MERCOR_URL from the environment or .env when that "
+                        "names the same route as --mode.")
     p.add_argument("--mode", choices=list(MODES),
                    default=DEFAULT_MODE,
                    help="Which reader to parse the page with. Same "
@@ -355,6 +358,9 @@ def parse_args():
     p.add_argument("--dump-html", default=None,
                    help="Also write the raw returned HTML to this path (always, even on success)")
     args = p.parse_args()
+    # Whether --url was TYPED, captured before the environment fills it: a
+    # MERCOR_URL from .env is a default, not a request.
+    typed_url = args.url
     # This client uses --key and --cdp-url rather than --twocaptcha-key and
     # --cdp-endpoint, so the env mapping is spelled out instead of defaulted.
     env_config.apply(args, keys={
@@ -362,9 +368,31 @@ def parse_args():
         "MERCOR_CDP_ENDPOINT": "cdp_url",
         "MERCOR_URL": "url",
     })
+    if args.url:
+        ok, why = is_supported_url(args.url)
+        if not ok:
+            p.error(why)
+        implied = mode_for_url(args.url)
+        if implied and implied != args.mode:
+            if typed_url:
+                # Refused rather than parsed with the wrong reader, which
+                # would report a served page as zero rows.
+                p.error("--url is a %s URL but --mode is %s; pass --mode %s, "
+                        "or drop --url." % (implied, args.mode, implied))
+            print("[i] MERCOR_URL (%s) is read by --mode %s; ignoring it for "
+                  "--mode %s." % (args.url, implied, args.mode),
+                  file=sys.stderr)
+            args.url = None
     if not args.url:
-        p.error("no --url given, and MERCOR_URL is not set in the environment "
-                "or in .env.")
+        # The index and the careers page each have one address, so those two
+        # modes need no URL. A job page does.
+        if args.mode == "careers":
+            args.url = CAREERS_URL
+        elif args.mode == "listings":
+            args.url = EXPLORE_URL
+        else:
+            p.error("--mode job needs --url (a work.mercor.com/jobs/... "
+                    "address); MERCOR_URL is not set to one.")
     return args
 
 

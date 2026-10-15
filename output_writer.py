@@ -32,8 +32,8 @@ with a UUID id space that shares nothing with a `list_…` id. The rows fit
 this dataclass — they are job postings with a title, a pay range and a
 location — but the two sets have no key in common and comparing them would
 produce a diff whose every line is an artefact. So `mode` goes in the
-sidecar and `diff_runs.py` REFUSES a cross-population comparison, which is
-CLAUDE.md §9's rule for a repo that reads more than one kind of thing.
+sidecar and `diff_runs.py` REFUSES a cross-population comparison, as
+any repo that reads more than one kind of thing has to.
 
 The row is `JobPosting` and not `Product`
 -----------------------------------------
@@ -41,8 +41,8 @@ Every shop repo in this family names its row `Product` and keeps the
 commerce columns even where they are null, because on a shop a null price
 is a fact worth recording. Mercor sells no products: there is no price, no
 currency on a product, no discount, no stock and no brand, and six columns
-null on every row of every run of every mode is exactly what §9 says must
-not exist. `wellfound-scraper`, `bbb-scraper` and `quora-scraper` are the
+null on every row of every run of every mode is a set of columns that
+should not exist. `wellfound-scraper`, `bbb-scraper` and `quora-scraper` are the
 precedent.
 
 What a job board has where a shop has a price is a RANGE, which is two
@@ -55,7 +55,7 @@ them in `compensation` so a consumer can always see what was published.
 What IS kept, byte-identical and in order, is the family prefix — `source`,
 `scraped_at`, `url`, `sku`, `title` — so one column name works across the
 family and a consumer reading several of these repos reads the same first
-five columns in the same order (§9).
+five columns in the same order.
 
 Twenty-one columns that are absent, and the measurement
 -------------------------------------------------------
@@ -69,7 +69,7 @@ across all 390 listings: `matchQuality`, `submittedOn`, `userSimilarityScore`,
 itself on that route. Most are logged-in personalisation that an anonymous
 fetch always sees as null or zero.
 
-They are not columns. §9: a column that is null on every row of every run
+They are not columns. A column that is null on every row of every run
 should not exist, and removing one needs the measurement written down so
 someone can add it back with a better one. Two exceptions are carried
 anyway and the reason is in each field's comment: `status`, because a
@@ -91,8 +91,11 @@ Everything below the dataclass is row-class-agnostic: pass `row_cls` so an
 empty CSV still gets the right header for the mode that produced it.
 """
 
+import contextlib
 import csv
 import json
+import os
+import tempfile
 from dataclasses import dataclass, asdict, field, fields
 from datetime import datetime, timezone
 from typing import Optional, List, Set, Sequence, Any, Type
@@ -123,8 +126,8 @@ class JobPosting:
 
     The family prefix — `source`, `scraped_at`, `url`, `sku`, `title` — is
     byte-identical and in this order across every repo in the family, so a
-    consumer reading several of them reads the same first five columns
-    (CLAUDE.md §9). Everything after it is Mercor's.
+    consumer reading several of them reads the same first five columns.
+    Everything after it is Mercor's.
     """
 
     source: str = SOURCE_DEFAULT
@@ -179,7 +182,7 @@ class JobPosting:
     # ---- pay ------------------------------------------------------------
     rate_min: Optional[float] = None
     rate_max: Optional[float] = None
-    # Read, never defaulted (§4). Null on every /explore row because that
+    # Read, never defaulted. Null on every /explore row because that
     # payload states no currency anywhere; USD on 40 of 40 sampled detail
     # pages; USD or GBP on a careers row. A null here means the route did
     # not say, not that the job is unpaid.
@@ -224,7 +227,7 @@ class JobPosting:
     # parsing failure — read it together with the flag below.
     company_name: Optional[str] = None
     # The site's own "may I show this client's name" flag: False on 291 of
-    # 390, True on 99. CLAUDE.md §21 — where a site publishes a
+    # 390, True on 99. Where a site publishes a
     # should-I-show-this flag, use it rather than inferring from the value.
     # A null `company_name` beside False is WITHHELD; beside True it would
     # be genuinely unset, and is worth looking at.
@@ -263,7 +266,7 @@ class JobPosting:
 
     # ---- provenance -----------------------------------------------------
     # Which route this row was read out of: `explore`, `detail` or
-    # `careers`. CLAUDE.md §8 — provenance of a value goes in a column, and
+    # `careers`. Provenance of a value goes in a column, and
     # `diff_runs.py` reports a difference that comes with a `data_source`
     # difference as `source_changed` rather than as a real change, so two
     # runs that differ only in which route they read do not read as the
@@ -352,12 +355,88 @@ def _csv_value(v: Any) -> Any:
     return v
 
 
+@contextlib.contextmanager
+def _atomic(path: str, newline: Optional[str] = None):
+    """Write to a temporary file beside `path`, then rename over it.
+
+    `open(path, "w")` truncates before a single byte is written, so a crash,
+    a kill or a full disk halfway through `json.dump` leaves a SHORTER file
+    where a complete one was: the previous good run is destroyed by the
+    attempt to replace it rather than by its outcome. Measured here before
+    the fix: a write that failed on an unserialisable row left a 1,042-byte
+    `out.json` as 96 bytes of invalid JSON.
+
+    The temporary file goes in the SAME directory on purpose: `os.replace`
+    is only atomic within one filesystem, and a temp file under /tmp can be
+    on another one, where the rename degrades to an interruptible copy.
+    `fsync` before the rename makes the content durable, not merely visible.
+    """
+    directory = os.path.dirname(os.path.abspath(path)) or "."
+    handle = tempfile.NamedTemporaryFile(
+        mode="w", encoding="utf-8", newline=newline, dir=directory,
+        prefix=os.path.basename(path) + ".", suffix=".tmp", delete=False)
+    try:
+        with handle:
+            yield handle
+            handle.flush()
+            os.fsync(handle.fileno())
+        # `NamedTemporaryFile` creates the file 0600 and a rename keeps that
+        # mode, so without this every output would be readable by its owner
+        # alone. An existing target keeps its own mode (someone may have set
+        # it on purpose); a new one gets what `open()` would have given it,
+        # which honours the umask. Never a flat 0644: that narrows 0664
+        # under umask 002.
+        try:
+            mode = os.stat(path).st_mode & 0o777
+        except OSError:
+            umask = os.umask(0)
+            os.umask(umask)
+            mode = 0o666 & ~umask
+        os.chmod(handle.name, mode)
+        os.replace(handle.name, path)
+    except BaseException:
+        try:
+            os.unlink(handle.name)
+        except OSError:
+            pass
+        raise
+
+
+# A spreadsheet treats a cell beginning with one of these as a FORMULA, not
+# as text, and every string in a row here (job titles, descriptions,
+# company names, locations) was written by a third party rather than by this
+# code. `=HYPERLINK(...)`, `+cmd|...` and `@SUM(...)` are the classic shapes;
+# a leading tab or newline is stripped by some readers, exposing whatever
+# follows it.
+CSV_FORMULA_LEADS = ("=", "+", "-", "@", "\t", "\r", "\n")
+
+# Prefixed to a cell that would otherwise be read as a formula. Excel, Google
+# Sheets and LibreOffice treat the apostrophe as "the rest is text"; a
+# consumer parsing the CSV with `csv` sees it, which is why the count goes in
+# the sidecar rather than staying silent.
+CSV_FORMULA_ESCAPE = "'"
+
+
+def _csv_escape(v: Any):
+    """Neutralise a formula-shaped cell. Returns (value, was_escaped).
+
+    Only STRINGS are touched: escaping a number would turn a negative
+    number into the text `'-5.0` and break every calculation over the
+    column. CSV only — the JSON output keeps the site's bytes as served, and
+    `csv_cells_escaped` in the sidecar declares that the two differ.
+    """
+    if isinstance(v, str) and v.startswith(CSV_FORMULA_LEADS):
+        return CSV_FORMULA_ESCAPE + v, True
+    return v, False
+
+
 def write_json(rows: Sequence[Any], path: str) -> None:
-    with open(path, "w", encoding="utf-8") as f:
+    with _atomic(path) as f:
         json.dump([asdict(r) for r in rows], f, ensure_ascii=False, indent=2)
 
 
-def write_csv(rows: Sequence[Any], path: str, row_cls: Type = JobPosting) -> None:
+def write_csv(rows: Sequence[Any], path: str, row_cls: Type = JobPosting) -> int:
+    """Write the CSV; return how many cells were formula-escaped."""
     # An empty result still gets the header row. A zero-byte file makes a
     # consumer fail on read (no columns to parse) instead of reading a valid
     # table with zero rows — and "an empty result is still a well-formed
@@ -366,11 +445,23 @@ def write_csv(rows: Sequence[Any], path: str, row_cls: Type = JobPosting) -> Non
     # The header comes from `row_cls`, not from the first row, so an empty
     # run still writes the columns of the mode that produced it.
     fieldnames = [f.name for f in fields(row_cls)]
-    with open(path, "w", encoding="utf-8", newline="") as f:
+    escaped = 0
+    # `newline=""` is the csv module's documented requirement and has to
+    # survive the move to a temp file, or every row gains a stray CR on
+    # Windows.
+    with _atomic(path, newline="") as f:
         writer = csv.DictWriter(f, fieldnames=fieldnames)
         writer.writeheader()
         for r in rows:
-            writer.writerow({k: _csv_value(v) for k, v in asdict(r).items()})
+            row = {}
+            for k, v in asdict(r).items():
+                # Escape AFTER `_csv_value`: a list joined into one cell is
+                # text too, and its first element can be formula-shaped.
+                value, was_escaped = _csv_escape(_csv_value(v))
+                row[k] = value
+                escaped += was_escaped
+            writer.writerow(row)
+    return escaped
 
 
 # Exit code used when a run completes but produced nothing. Distinct from 1
@@ -460,7 +551,10 @@ def write_run_meta(out_prefix: str, meta: dict) -> str:
     both complete, and between runs of different `mode`.
     """
     path = f"{out_prefix}.meta.json"
-    with open(path, "w", encoding="utf-8") as f:
+    # Atomic for the same reason as the rows, and more urgently: this is the
+    # file a consumer BRANCHES on, so a truncated sidecar beside good rows
+    # reads as a broken run over data that is fine.
+    with _atomic(path) as f:
         json.dump(meta, f, ensure_ascii=False, indent=2)
     print(f"[+] Wrote run metadata -> {path} (status={meta.get('status')})")
     return path
@@ -536,14 +630,15 @@ def run_meta(status: str, stop_reason: str, pages_requested: int,
     }
     if extra:
         # Merged rather than nested under a key, so a consumer reads
-        # `shop_rating` at the top level beside `products`. Run fields win a
+        # `records_in_payload` at the top level beside `products`. Run fields win a
         # name collision: a caller cannot accidentally overwrite `status`.
         meta.update({k: v for k, v in extra.items() if k not in meta})
     return meta
 
 
 def save(rows: Sequence[Any], out_prefix: str, fmt: str,
-         allow_empty: bool = False, row_cls: Type = JobPosting) -> int:
+         allow_empty: bool = False, row_cls: Type = JobPosting,
+         stats: Optional[dict] = None) -> int:
     """Write JSON/CSV and return a process exit code.
 
     Returns 0 when rows were written, EXIT_NO_PRODUCTS when there were none.
@@ -570,8 +665,17 @@ def save(rows: Sequence[Any], out_prefix: str, fmt: str,
         write_json(rows, f"{out_prefix}.json")
         print(f"[+] Saved {len(rows)} jobs -> {out_prefix}.json")
     if fmt in ("csv", "both"):
-        write_csv(rows, f"{out_prefix}.csv", row_cls=row_cls)
+        escaped = write_csv(rows, f"{out_prefix}.csv", row_cls=row_cls)
         print(f"[+] Saved {len(rows)} jobs -> {out_prefix}.csv")
+        # Reported through `stats` because this function's return IS the
+        # exit code. The caller threads it into the sidecar.
+        if stats is not None:
+            stats["csv_cells_escaped"] = escaped
+        if escaped:
+            print(f"[!] {escaped} CSV cell(s) began with a formula character "
+                  f"and were prefixed with {CSV_FORMULA_ESCAPE!r} so a "
+                  f"spreadsheet reads them as text. The JSON output is "
+                  f"unchanged — see csv_cells_escaped in the sidecar.")
     return 0 if rows else EXIT_NO_PRODUCTS
 
 
@@ -605,7 +709,7 @@ def save(rows: Sequence[Any], out_prefix: str, fmt: str,
 #
 # Note what it does NOT mean: `/explore` holds 390 of the 462 listings
 # Mercor publishes, so a complete `--mode listings` run is still a slice.
-# CLAUDE.md §21 — complete and exhaustive are different words — and the
+# Complete and exhaustive are different words — and the
 # sidecar records both figures so a consumer is not left inferring one from
 # the other.
 COMPLETE_STOP_REASONS = ("completed", "pagination_exhausted", "no_new_products",
@@ -646,8 +750,14 @@ def finish_run(rows: Sequence[Any], out_prefix: str, fmt: str,
     # names has a hole for every name nobody added to it.
     complete = stop_reason in COMPLETE_STOP_REASONS and not pages_failed
     row_cls = ROW_CLASS_BY_MODE.get(mode, JobPosting)
-    rc = save(rows, out_prefix, fmt, allow_empty=allow_empty, row_cls=row_cls)
+    stats: dict = {}
+    rc = save(rows, out_prefix, fmt, allow_empty=allow_empty, row_cls=row_cls,
+              stats=stats)
     wrote_output = bool(rows) or allow_empty
+    if stats:
+        # Housekeeping goes UNDER the caller's `extra`: a name collision must
+        # never drop site data in favour of a count.
+        extra = {**stats, **(extra or {})}
 
     if wrote_output:
         status = "complete" if (rows and complete) else (
