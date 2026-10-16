@@ -47,6 +47,8 @@ it from a bill or from a diff.
 >   `scraper_api_client.py`.
 
 ### Changed
+
+- CI only: the canary now runs weekly (Mondays 05:40 UTC) instead of daily, and on a manual dispatch.
 - **A refused page has the same stop reason in every engine.** A 403 now
   ends with `blocked_refused` in Selenium and pyppeteer, which said
   `blocked_cloudflare (hard block)`; Playwright already said
