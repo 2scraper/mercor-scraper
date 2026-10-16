@@ -11,6 +11,8 @@ it from a bill or from a diff.
 
 ## [Unreleased]
 
+## [0.1.1] — 2026-10-16
+
 > **Behaviour change: a Mercor 5xx is no longer exit 4.** A page the site
 > answered with a server error used to be counted as served, and a run whose
 > only page was a 503 said "empty result" (exit 4). Now the page is retried
@@ -21,21 +23,6 @@ it from a bill or from a diff.
 > status is the Scraper API's `http_code`. A Scraper API answer of
 > `status: "error"` with no target status is exit 5 too. A 404 is still
 > exit 4.
-
-### Fixed
-- **`scraper_api_client.py` handles a Mercor 404 the way the browser engines
-  do.** The exit code was already 4 and stays 4. A dead job answered through
-  the Scraper API (HTTP 200 with `http_code: 404`) is now named `not_found` in
-  the log. With `--allow-empty` it also writes the same empty output and
-  sidecar as Playwright (`stop_reason`, `urls_not_found`, `jobs_not_found`).
-  Before, it returned 4 with no sidecar and logged "0 jobs parsed". A
-  non-200 from the Scraper API itself is still exit 5. A served page with
-  no records (exit 4) now also goes through the shared writer, so
-  `--allow-empty` writes its output and sidecar on that path too. An offline check
-  runs the client against a sanitized real Mercor 404 and the Playwright
-  engine against the same page, and compares the two.
-
-## [0.1.1] — 2026-10-07
 
 > **Behaviour changes for an existing user — read these before upgrading.**
 >
@@ -76,8 +63,19 @@ it from a bill or from a diff.
 Found by a third-party audit of 0.1.0 (taken at `ceeb142`), every claim of
 which was reproduced before it was worked, plus what running the fixes found.
 
-### Fixed (2026-10-15)
+### Fixed
 
+- **`scraper_api_client.py` handles a Mercor 404 the way the browser engines
+  do.** The exit code was already 4 and stays 4. A dead job answered through
+  the Scraper API (HTTP 200 with `http_code: 404`) is now named `not_found` in
+  the log. With `--allow-empty` it also writes the same empty output and
+  sidecar as Playwright (`stop_reason`, `urls_not_found`, `jobs_not_found`).
+  Before, it returned 4 with no sidecar and logged "0 jobs parsed". A
+  non-200 from the Scraper API itself is still exit 5. A served page with
+  no records (exit 4) now also goes through the shared writer, so
+  `--allow-empty` writes its output and sidecar on that path too. An offline check
+  runs the client against a sanitized real Mercor 404 and the Playwright
+  engine against the same page, and compares the two.
 - **A failed write no longer destroys the previous good output.** JSON, CSV
   and `<out>.meta.json` were opened with `"w"`, so a write that failed
   halfway (measured: an unserialisable row) left a 1,042-byte `out.json` as
@@ -119,10 +117,6 @@ which was reproduced before it was worked, plus what running the fixes found.
 - Canary: the careers job no longer requires 80% of roles to publish a
   salary (that is the employer's choice); it now requires every published
   salary figure to be parsed into a rate.
-
-
-### Fixed
-
 - **A withdrawn listing ended the whole `--mode job` queue.** Three enumerated
   addresses, the second a 404, gave ONE row, `status: complete`, exit 0,
   `stop_reason: no_new_products`, the third never fetched. "This page added
@@ -229,7 +223,6 @@ which was reproduced before it was worked, plus what running the fixes found.
   that is an integer). Pinned by an offline check that drives the real
   client with `requests.post` stubbed; verified by control (red with the
   old client).
-
 - `SECURITY.md` said this project has no releases or version tags; it has
   both. "Supported versions" now names the latest release and `main`.
 
