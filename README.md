@@ -470,9 +470,9 @@ to parse **identically** to its untrimmed original before being committed.
 CI runs the suite offline on the oldest and newest supported Python, builds
 and runs the Docker image, and installs each engine in its own virtualenv to
 check the versions users actually get. The **canary** runs a real scrape
-daily from a bare GitHub runner with no secrets — which is what keeps this
+weekly (Mondays) from a bare GitHub runner with no secrets — which is what keeps this
 README's central claim honest. If Mercor ever puts these routes behind a
-challenge or a key, the badge goes red the next morning and the claim is
+challenge or a key, the badge goes red on the next weekly run and the claim is
 retested without anyone having to remember to.
 
 ---

@@ -15,7 +15,7 @@
 # and eighteen candidate bot-challenge markers counted at zero across seven
 # captures.
 #
-# So these jobs run a real scrape every morning from a runner with no
+# So these jobs run a real scrape every Monday from a runner with no
 # secrets, and they are expected to be GREEN. That is not a convenience — it
 # is what keeps the central claim of this repo's README honest. If Mercor
 # ever puts these routes behind a challenge, a key or a rate limit, the badge
@@ -32,7 +32,7 @@ on:
   schedule:
     # 05:40 UTC. Not on the hour: every scheduled workflow on GitHub fires at
     # :00 and the queue there is long.
-    - cron: "40 5 * * *"
+    - cron: "40 5 * * 1"
   workflow_dispatch:
 
 permissions:
@@ -300,7 +300,7 @@ jobs:
       # page is one job detail page, and the addresses come from the
       # sitemap ∪ index enumeration rather than from a guessed convention.
       #
-      # Four pages, not four hundred. This runs daily against a site that
+      # Four pages, not four hundred. This runs weekly against a site that
       # imposes no rate limit, and that is a reason to be careful rather
       # than a licence: the check is that enumeration and multi-page fetch
       # still work, which four pages proves as well as four hundred would.
@@ -360,7 +360,7 @@ jobs:
           want("the enumeration still finds a catalogue",
                isinstance(enumerated, int) and enumerated >= 100,
                f"jobs_enumerated was {enumerated}")
-          # BOTH sources answered. This is the daily check that makes a lost
+          # BOTH sources answered. This is the scheduled check that makes a lost
           # sitemap loud: without it a run could enumerate from the index
           # alone, fetch every address it was given, and be green. Since
           # v0.1.1 such a run is `partial`, which the status check above
