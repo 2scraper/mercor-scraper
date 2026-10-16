@@ -236,8 +236,9 @@ within the existing retry budget. If every attempt is a 5xx, the page is
 failed (stop reason `target_http_5xx`), and the sidecar records the status
 per page in `pages_target_http_error`. That status is the navigation's own in
 the browser engines and `http_code` through the Scraper API. With no rows,
-nothing is written, so earlier good output and its sidecar stay as they were;
-`--allow-empty` writes a `failed` sidecar instead.
+nothing is written, so earlier good output and its sidecar stay as they were.
+Only when nothing earlier exists at `--out` does `--allow-empty` write a
+`failed` sidecar on its own.
 
 **A 403 from Mercor is `3` (blocked), and a 429 is `3` once it persists.**
 Both pages are fetched again within the same block-retry budget as any
@@ -250,8 +251,34 @@ attempts. A page that is still refused ends the run with stop reason
 rows. Nothing about the page's contents is concluded either way. A 429 is
 never solved.
 
-A run that finds nothing **writes nothing** — last night's good output is
-never replaced with `[]`. `--allow-empty` opts out.
+**Any other non-2xx from Mercor is `5` too.** A 400 or 401, for example,
+even with an empty payload. The stop reason is `target_http_error`, the
+status goes into `pages_target_http_error`, and the page is not retried.
+
+**No job data is `4` only when the site says so.** That means a 2xx page
+whose own payload container is present and empty. A served page that
+carries neither records nor that empty container is a parser failure. It is
+`5` with stop reason `parser_found_nothing` and the page in
+`pages_unreadable`, or `6` after rows. This covers a page that stayed
+unreadable through its retries and wait. Such a page used to end as `4`
+"completed".
+
+A run that finds nothing **writes nothing**, so last night's good output is
+never replaced with `[]`.
+
+**`--allow-empty` is for a genuine empty result only.** With it, a run that
+finished and found nothing writes an empty JSON (`[]`), a CSV holding only
+its header, and a sidecar with `status: empty` and its `stop_reason`. It
+still exits `4`. It never turns a blocked or failed run into an empty one:
+- blocked still exits `3`;
+- never obtained or parser failure still exits `5`;
+- partial still exits `6`.
+
+For the zero-row failures no row file is written, and an earlier output at
+the same `--out` is left untouched, sidecar included. Only when nothing
+earlier exists there does a blocked or failed `--allow-empty` run write a
+sidecar on its own, with `status: blocked` or `failed`. `diff_runs.py`
+compares an `empty` run like a complete one.
 
 ---
 

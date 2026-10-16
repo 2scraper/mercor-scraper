@@ -11,6 +11,28 @@ it from a bill or from a diff.
 
 ## [Unreleased]
 
+> **Behaviour change: `--allow-empty` writes an empty file only for a genuine
+> empty result.** Its sidecar now says `status: empty` (it was `failed`), and
+> `diff_runs.py` accepts it. A blocked or failed run with `--allow-empty` no
+> longer replaces earlier output with `[]`. It keeps its exit code (3 or 5)
+> and leaves that output and its sidecar untouched. With nothing earlier at
+> `--out`, it writes only a sidecar, which now says `blocked` for a blocked
+> run (it was `failed`).
+>
+> **Behaviour change: no job data is exit 4 only when the site says so.**
+> - **A served page with neither records nor the site's own empty
+>   container** used to end as exit 4 `completed`. That includes a small
+>   200 that stayed unreadable through its retries. It is now
+>   `parser_found_nothing`: exit 5, or 6 after rows, with the page in
+>   `pages_unreadable`.
+> - **An unexplained non-2xx** (not 404/410, 403, 429 or 5xx) is content
+>   not obtained, even with an empty payload: exit 5 (6 after rows), stop
+>   reason `target_http_error`, status in `pages_target_http_error`, not
+>   retried.
+> - **Everywhere.** This applies in all three engines and
+>   `scraper_api_client.py`. A `parse_error` in the API client now goes
+>   through `finish_run` too.
+
 > **Behaviour change: target 410 and 429 are decided by their status.**
 > - **410 means the page is gone.** Mercor's 410 is now `not_found`, like a
 >   404: exit 4, fetched once, and counted in `jobs_not_found`. Before, it
