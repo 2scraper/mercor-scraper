@@ -70,7 +70,8 @@ MAX_API_TIMEOUT = 120
 # of one exit code is how a family's contract drifts.
 from output_writer import (EXIT_API_ERROR, SOURCE_DEFAULT,  # noqa: E402
                            finish_run)
-from page_flow import (THROTTLED, TARGET_SERVER_ERROR,  # noqa: E402
+from page_flow import (THROTTLED, TARGET_SERVER_ERROR,  # noqa: E402,F401
+                       PARSER_FOUND_NOTHING, http_error_stop_reason,
                        target_server_error, throttle_pause)
 
 # `_run_once` asks `main` for another attempt after a target 5xx, a refusal
@@ -322,13 +323,16 @@ def _run_once(args, attempt: int = 1, attempts: int = 1) -> int:
         # It says nothing about what the page holds: retried within
         # --retries, then the content was not obtained (exit 5), never the
         # empty result of exit 4. No rows, so earlier output is kept.
-        if attempt < attempts:
+        # Only a 5xx is retried; any other unexplained non-2xx is final, as
+        # in the browser engines.
+        if server_error >= 500 and attempt < attempts:
             return _RETRY_TARGET_5XX
-        logger.error("Mercor answered HTTP %d for %s on every attempt — "
+        logger.error("Mercor answered HTTP %d for %s — "
                      "exit %d: the page was not obtained, NOT an empty "
                      "result (exit 4).", server_error, args.url, EXIT_API_ERROR)
         return finish_run([], args.out, args.format, args.allow_empty,
-                          blocked=False, stop_reason=TARGET_SERVER_ERROR,
+                          blocked=False,
+                          stop_reason=http_error_stop_reason(server_error),
                           pages_requested=1, pages_completed=0,
                           pages_failed=[1], mode=args.mode,
                           source=SOURCE_DEFAULT, start_url=args.url,
@@ -397,17 +401,25 @@ def _run_once(args, attempt: int = 1, attempts: int = 1) -> int:
             f.write(html)
         logger.warning("0 jobs parsed — saved the raw response to %s so "
                        "you can see what actually came back.", dump)
-        if state == "parse_error":
-            # Served, and this parser could not find where the records would
-            # be (or the page contradicts itself). That is NOT "the listing
-            # is empty": exit 4 would tell a pipeline the site had nothing,
-            # when nothing can be concluded about the site from this run. It
-            # is exit 5, the same number the browser engines give it.
-            logger.error("The page was served but the reader could not find "
-                         "the records in it — exit %d, NOT an empty result "
-                         "(exit 4). The saved response shows what changed.",
-                         EXIT_API_ERROR)
-            return EXIT_API_ERROR
+        if state != "empty":
+            # Served, and either this parser could not find where the records
+            # would be (`parse_error`) or the response never was the payload
+            # (`unknown`). Only `empty` — the site's own container, present
+            # and holding nothing — is the site saying there are no jobs.
+            # Anything else is exit 5 through finish_run, the same number
+            # and sidecar the browser engines give it.
+            logger.error("The page was served (state %r) but holds neither "
+                         "records nor the site's own empty answer — exit %d, "
+                         "NOT an empty result (exit 4). The saved response "
+                         "shows what came back.", state, EXIT_API_ERROR)
+            return finish_run([], args.out, args.format, args.allow_empty,
+                              blocked=False, stop_reason=PARSER_FOUND_NOTHING,
+                              pages_requested=1, pages_completed=0,
+                              pages_failed=[1], mode=args.mode,
+                              source=SOURCE_DEFAULT, start_url=args.url,
+                              final_url=args.url,
+                              extra={"route_is_paginated": args.mode == "job",
+                                     "mode": args.mode, "pages_unreadable": [1]})
         # Served, and the site's own payload holds nothing: exit 4 through
         # the same `finish_run` as the browser engines, so `--allow-empty`
         # writes the same empty output and sidecar here as there.

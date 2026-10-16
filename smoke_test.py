@@ -3920,9 +3920,7 @@ def check_target_4xx_statuses_agree_in_every_engine():
                 equal("%s: ...re-fetched within the block budget" % name,
                       navs.get(_DEAD_JOB), budget)
                 meta = meta or {}
-                # This repo's finish_run labels a zero-row --allow-empty
-                # sidecar "failed" whatever the cause; stop_reason says which.
-                equal("%s: ...sidecar failed" % name, meta.get("status"), "failed")
+                equal("%s: ...sidecar blocked" % name, meta.get("status"), "blocked")
                 equal("%s: ...stop_reason for %d" % (name, status),
                       meta.get("stop_reason"), reason)
                 equal("%s: ...growing pause used only for 429 (%d)" % (name, status),
@@ -4012,10 +4010,186 @@ def check_target_4xx_statuses_in_the_scraper_api_client():
         equal("scraper API: ...pauses for %d" % status, sleeps, want_sleeps)
         code, meta, _, _ = run([answer(status, body)], ["--allow-empty"])
         meta = meta or {}
-        equal("scraper API: %d + --allow-empty: exit 3 and the stop_reason" % status,
-              (code, meta.get("status"), meta.get("stop_reason")), (3, "failed", reason))
+        equal("scraper API: %d + --allow-empty writes a blocked sidecar" % status,
+              (code, meta.get("status"), meta.get("stop_reason")), (3, "blocked", reason))
     code, _, calls, _ = run([answer(429, _THROTTLED_HTML), answer(200, DETAIL_HTML)])
     equal("scraper API: a 429 that clears on the retry is exit 0", (code, calls), (0, 2))
+
+
+def _allow_empty_contract(O, row_cls):
+    """(label, got, want) for every outcome `--allow-empty` must keep apart.
+
+    The flag writes an empty file, with a CSV header and a sidecar saying
+    `status: empty`, ONLY for a genuine empty result: a finished run whose
+    answer was nothing (exit 4). Blocked (3), never-obtained or parser
+    failure (5) and partial (6) keep their exit codes, and an earlier good
+    output is never overwritten for them, rows or sidecar.
+    """
+    import types
+    import diff_runs
+    out = []
+    good = [row_cls(sku="A1", title="yesterday")]
+
+    def run(prefix, rows, allow, **kw):
+        base = dict(blocked=False, stop_reason="completed", pages_requested=1,
+                    pages_completed=1, start_url="u", final_url="u",
+                    mode="listings")
+        base.update(kw)
+        with contextlib.redirect_stdout(io.StringIO()):
+            return O.finish_run(rows, prefix, "both", allow, **base)
+
+    def snapshot(prefix):
+        return {ext: open(prefix + ext, "rb").read()
+                for ext in (".json", ".csv", ".meta.json")
+                if os.path.exists(prefix + ext)}
+
+    failures = (
+        ("blocked", dict(blocked=True, stop_reason="blocked_refused",
+                         pages_completed=0, pages_failed=[1]), O.EXIT_BLOCKED, "blocked"),
+        ("never obtained", dict(stop_reason="page_load_timeout", pages_completed=0,
+                                pages_failed=[1]), 5, "failed"),
+        ("a parser failure on a served page",
+         dict(stop_reason="parser_found_nothing", pages_failed=[1]), 5, "failed"),
+    )
+    d = tempfile.mkdtemp()
+    p = os.path.join(d, "empty")
+    rc = run(p, [], True)
+    out.append(("genuine empty + --allow-empty: exit", rc, O.EXIT_NO_PRODUCTS))
+    out.append(("...the JSON is []", json.load(open(p + ".json", encoding="utf-8")), []))
+    header = open(p + ".csv", encoding="utf-8").read().splitlines()
+    out.append(("...the CSV is its header and nothing else",
+                (len(header), "sku" in (header[0] if header else "")), (1, True)))
+    meta = json.load(open(p + ".meta.json", encoding="utf-8"))
+    out.append(("...the sidecar says empty and why",
+                (meta.get("status"), meta.get("stop_reason")), ("empty", "completed")))
+    p2 = os.path.join(d, "empty_plain")
+    rc = run(p2, [], False)
+    out.append(("genuine empty without the flag: exit 4, nothing written",
+                (rc, snapshot(p2)), (O.EXIT_NO_PRODUCTS, {})))
+    g = os.path.join(d, "good0")
+    run(g, good, False)
+    with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+        ok = diff_runs._check_comparable(types.SimpleNamespace(
+            old=g + ".json", new=p + ".json", force=False))
+    out.append(("diff_runs compares a complete run with an empty one", bool(ok), True))
+    for label, kw, code, status in failures:
+        p = os.path.join(d, label.replace(" ", "_"))
+        run(p, good, False)
+        before = snapshot(p)
+        rc = run(p, [], True, **kw)
+        out.append(("%s + --allow-empty: exit" % label, rc, code))
+        out.append(("%s: the earlier output and its sidecar are kept byte for byte" % label,
+                    snapshot(p) == before, True))
+        q = p + "_fresh"
+        rc = run(q, [], True, **kw)
+        meta = (json.load(open(q + ".meta.json", encoding="utf-8"))
+                if os.path.exists(q + ".meta.json") else {})
+        out.append(("%s, nothing earlier: exit, row files, status" % label,
+                    (rc, os.path.exists(q + ".json"), os.path.exists(q + ".csv"),
+                     meta.get("status")), (code, False, False, status)))
+    p = os.path.join(d, "partial")
+    rc = run(p, good, True, stop_reason="page_load_timeout", pages_requested=2,
+             pages_failed=[2])
+    meta = json.load(open(p + ".meta.json", encoding="utf-8"))
+    out.append(("rows then a failure + --allow-empty: exit 6, partial",
+                (rc, meta.get("status")), (O.EXIT_PARTIAL, "partial")))
+    return out
+
+
+def check_allow_empty_writes_only_a_genuine_empty_result():
+    import output_writer as O
+    for label, got, want in _allow_empty_contract(O, O.JobPosting):
+        equal(label, got, want)
+
+
+_EMPTY_EXPLORE_HTML = (
+    '<html><head><link href="/_next/static/css/a.css"/></head>'
+    '<body><script id="__NEXT_DATA__" type="application/json" nonce="x50vDK">'
+    + json.dumps({"props": {"pageProps": {"dehydratedState": {
+        "queries": [{"queryKey": ["listings-explore-page"],
+                     "state": {"data": {"listings": []}}}]}}},
+        "page": "/explore"}) + '</script></body></html>')
+_TINY_HTML = "<html><body>hello</body></html>"
+_EXPLORE_URL = "https://work.mercor.com/explore"
+
+
+def check_no_job_data_is_exit_4_only_when_the_site_says_so():
+    """A page with no job data is the genuine empty result (exit 4) only
+    under a 2xx and only when the payload's own container is present and
+    empty. An unexplained non-2xx (here 400) is content not obtained; a 2xx
+    that never became the payload is a parser failure. Both are exit 5 (6
+    after rows). A small non-payload 200 used to end as exit 4 `completed`."""
+    import page_flow
+    for name in ENGINES:
+        listing = ["--url", _EXPLORE_URL, "--retries", "1"]
+        got = _drive_engine_over_routes(name, listing + ["--allow-empty"],
+                                        lambda url: (200, _EMPTY_EXPLORE_HTML))
+        if got is None:
+            continue
+        code, meta, _, _ = got
+        equal("%s: the site's own empty index is exit 4, status empty" % name,
+              (code, (meta or {}).get("status")), (4, "empty"))
+        code, meta, navs, _ = _drive_engine_over_routes(
+            name, listing + ["--allow-empty"], lambda url: (400, _EMPTY_EXPLORE_HTML))
+        meta = meta or {}
+        equal("%s: an empty payload under HTTP 400 is exit 5, not obtained" % name,
+              (code, meta.get("status"), meta.get("stop_reason"),
+               meta.get("pages_target_http_error")),
+              (5, "failed", page_flow.TARGET_HTTP_ERROR, {"1": 400}))
+        equal("%s: ...not retried" % name, sum(navs.values()), 1)
+        for argv in (listing, ["--mode", "job", "--url", _DEAD_JOB, "--retries", "1"]):
+            code, meta, _, _ = _drive_engine_over_routes(
+                name, argv + ["--allow-empty"], lambda url: (200, _TINY_HTML))
+            meta = meta or {}
+            equal("%s %s: a 200 with no job data and no empty marker is exit 5" % (name, argv[1]),
+                  (code, meta.get("status"), meta.get("stop_reason")),
+                  (5, "failed", page_flow.PARSER_FOUND_NOTHING))
+        queue = [_GOOD_JOB, _DEAD_JOB]
+        route = lambda url: (200, DETAIL_HTML) if url == _GOOD_JOB else (200, _TINY_HTML)
+        code, meta, _, _ = _drive_engine_over_routes(
+            name, ["--mode", "job", "--pages", "2", "--retries", "1"], route,
+            job_queue=queue)
+        equal("%s: rows, then a page with no job data, is exit 6" % name,
+              (code, (meta or {}).get("pages_unreadable")), (6, [2]))
+
+
+def check_no_job_data_is_exit_4_only_when_the_site_says_so_in_the_api_client():
+    import page_flow
+    import scraper_api_client as sac
+
+    def run(code_, body, mode="listings", url=None):
+        out = os.path.join(tempfile.mkdtemp(), "o")
+        class _R:
+            status_code = 200
+            headers = {}
+            text = ""
+            def json(self):
+                return {"status": "success", "http_code": code_, "headers": {}, "body": body}
+        calls = []
+        saved = (sac.requests.post, sys.argv, sac.env_config.apply, sac.time.sleep)
+        sac.requests.post = lambda u, **kw: calls.append(1) or _R()
+        sac.env_config.apply = lambda a, **k: None
+        sac.time.sleep = lambda s: None
+        sys.argv = ["scraper_api_client.py", "--key", "k" * 8, "--mode", mode,
+                    "--url", url or _EXPLORE_URL, "--format", "json", "--out", out,
+                    "--retries", "1", "--retry-delay", "0", "--allow-empty"]
+        try:
+            with contextlib.redirect_stdout(io.StringIO()):
+                rc = sac.main()
+        finally:
+            sac.requests.post, sys.argv, sac.env_config.apply, sac.time.sleep = saved
+        meta = (json.load(open(out + ".meta.json", encoding="utf-8"))
+                if os.path.exists(out + ".meta.json") else {})
+        return rc, meta.get("status"), meta.get("stop_reason"), len(calls)
+
+    equal("scraper API: the site's own empty index is exit 4, status empty",
+          run(200, _EMPTY_EXPLORE_HTML)[:2], (4, "empty"))
+    equal("scraper API: an empty payload under HTTP 400 is exit 5, once",
+          run(400, _EMPTY_EXPLORE_HTML), (5, "failed", page_flow.TARGET_HTTP_ERROR, 1))
+    for mode, url in (("listings", None), ("job", _DEAD_JOB)):
+        equal("scraper API %s: a 200 with no job data and no empty marker is exit 5" % mode,
+              run(200, _TINY_HTML, mode, url)[:3],
+              (5, "failed", page_flow.PARSER_FOUND_NOTHING))
 
 
 def check_no_engine_branches_on_a_mode_that_does_not_exist():

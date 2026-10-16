@@ -893,7 +893,7 @@ def _fetch_one_page(session, args, pool, page_num: int, url: str) -> PageOutcome
     outcome.state = state
     outcome.server_error = page_flow.target_server_error(state, http_status)
     if outcome.server_error is not None:
-        logger.error("Page %d: Mercor answered HTTP %d (a server error) on every "
+        logger.error("Page %d: Mercor answered HTTP %d (an error status) on every "
                      "attempt. Nothing was obtained from it, so this page is "
                      "FAILED, not empty.", page_num, outcome.server_error)
         outcome.final_url = d["current_url"]()

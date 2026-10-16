@@ -346,6 +346,14 @@ ENUMERATION_INCOMPLETE = "enumeration_incomplete"
 PARSER_FOUND_NOTHING = "parser_found_nothing"
 
 
+# A served page (2xx, or no status to read) that ended without job data and
+# without the site's own empty answer. `parse_error` is a page we could not
+# read; `unknown` is one that never turned into the payload after its
+# retries and wait. Neither is "zero jobs": only `empty` — the payload's own
+# container, present and holding nothing — is the site saying so.
+UNREADABLE_STATES = ("parse_error", "unknown")
+
+
 def account_for_pages(outcomes):
     """(read, failed page numbers, unreadable page numbers) — one place.
 
@@ -364,8 +372,8 @@ def account_for_pages(outcomes):
     concluded" — instead of exit 4's claim that the answer was nothing.
     """
     unreadable = sorted(o.page_num for o in outcomes
-                        if o.ok and o.state == "parse_error")
-    read = [o for o in outcomes if o.ok and o.state != "parse_error"]
+                        if o.ok and o.state in UNREADABLE_STATES)
+    read = [o for o in outcomes if o.ok and o.state not in UNREADABLE_STATES]
     failed = sorted({o.page_num for o in outcomes if not o.ok}
                     | set(unreadable))
     return read, failed, unreadable
@@ -377,7 +385,10 @@ TARGET_SERVER_ERROR = "target_http_5xx"
 
 
 def target_server_error(state: str, status) -> Optional[int]:
-    """The status, when a page ended as a target-site server error.
+    """The status, when a page ended as a target-site HTTP error.
+
+    Any non-2xx status that no other rule explains counts, not only a 5xx:
+    an `empty` payload under HTTP 400 is not the site's empty result.
 
     `detect_page_state` calls a 5xx with no records `unknown`, and `unknown`
     is retried. When the retries are spent the page is still not the site's
@@ -386,9 +397,21 @@ def target_server_error(state: str, status) -> Optional[int]:
     rows), never the empty result exit 4 claims. A 404 is not here: that is
     the site saying the address does not exist.
     """
-    if state == "unknown" and isinstance(status, int) and status >= 500:
+    if (state in _UNANSWERED_STATES and isinstance(status, int)
+            and not isinstance(status, bool) and not 200 <= status < 300):
         return status
     return None
+
+
+# The stop reason for a page the target answered with a non-2xx status that
+# no other rule explains (not 404/410, 403, 429 or 5xx): a 400, a 401, a
+# 451. Content not obtained, exactly like a 5xx, but not retried — the
+# classifier calls such a page `empty` or `parse_error` before it gets here.
+TARGET_HTTP_ERROR = "target_http_error"
+
+# States a non-2xx status turns into "content not obtained". `content`,
+# `not_found`, `blocked` and `throttled` already explain themselves.
+_UNANSWERED_STATES = ("unknown", "empty", "parse_error")
 
 
 # The state, the `blocked_by` value and the stop reason for a page the
@@ -410,19 +433,25 @@ def throttle_pause(retry_delay: float, block_attempt: int) -> float:
                float(retry_delay) * (2 ** (int(block_attempt) + 1)))
 
 
+def http_error_stop_reason(status: int) -> str:
+    """`target_http_5xx` for a server error, `target_http_error` otherwise."""
+    return TARGET_SERVER_ERROR if status >= 500 else TARGET_HTTP_ERROR
+
+
 def failure_stop_reason(outcome) -> str:
     """Why a failed page ended the run, in the same words for every engine."""
     if outcome.load_failed:
         return "page_load_timeout"
     if getattr(outcome, "server_error", None) is not None:
-        return TARGET_SERVER_ERROR
+        return http_error_stop_reason(outcome.server_error)
     if outcome.blocked_by == THROTTLED:
         return THROTTLED
     return f"blocked_{outcome.blocked_by}"
 
 
 def target_http_errors(outcomes) -> dict:
-    """{page number: target status} for every page that ended as a 5xx."""
+    """{page number: target status} for every page that ended as a target
+    HTTP error (a 5xx, or a non-2xx no other rule explains)."""
     return {str(o.page_num): o.server_error
             for o in sorted(outcomes, key=lambda o: o.page_num)
             if getattr(o, "server_error", None) is not None}
