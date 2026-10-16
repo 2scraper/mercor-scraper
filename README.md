@@ -220,8 +220,8 @@ and the page named in `pages_unreadable` — never `4`, which would tell you
 the site had nothing. `--retries` counts attempts, so `--retries 0` is a
 usage error (exit 2).
 
-**A 404 from Mercor is `4`, and it is `4` on every path.** A job address the
-site answers 404 for (stop reason `completed`, the address in
+**A 404 or 410 from Mercor is `4`, and it is `4` on every path.** A job
+address the site answers 404 or 410 for (stop reason `completed`, the address in
 `urls_not_found`) is a real answer from the site: the job is gone. The
 browser engines read that 404 from the navigation's status. Through
 `scraper_api_client.py` it arrives as the `http_code` of an HTTP 200 Scraper
@@ -238,6 +238,17 @@ per page in `pages_target_http_error`. That status is the navigation's own in
 the browser engines and `http_code` through the Scraper API. With no rows,
 nothing is written, so earlier good output and its sidecar stay as they were;
 `--allow-empty` writes a `failed` sidecar instead.
+
+**A 403 from Mercor is `3` (blocked), and a 429 is `3` once it persists.**
+Both pages are fetched again within the same block-retry budget as any
+refusal: a different exit with a proxy pool, or one plain re-fetch without
+one. A 429 waits longer before each new attempt. The pause starts at twice
+`--retry-delay`, doubles with each attempt and is capped at 60 s. Through
+`scraper_api_client.py` the same pause applies between its `--retries`
+attempts. A page that is still refused ends the run with stop reason
+`blocked_refused` (403) or `throttled` (429): exit `3`, or `6` after earlier
+rows. Nothing about the page's contents is concluded either way. A 429 is
+never solved.
 
 A run that finds nothing **writes nothing** — last night's good output is
 never replaced with `[]`. `--allow-empty` opts out.

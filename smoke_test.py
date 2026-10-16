@@ -1084,7 +1084,14 @@ def check_state_policy():
     equal("every state has a policy",
           sorted(page_flow.STATE_POLICY),
           ["blocked", "content", "empty", "not_found", "parse_error",
-           "unknown"])
+           "throttled", "unknown"])
+    # HTTP 429: retried (with a growing pause), never solved, and a refusal
+    # when it persists — exit 3, or 6 after rows; never parsed as empty.
+    check("throttled: retried, never solved, counts as blocked, not parsed",
+          page_flow.should_retry("throttled")
+          and not page_flow.should_solve("throttled")
+          and page_flow.counts_as_blocked("throttled")
+          and not page_flow.should_parse("throttled"))
     check("content: parsed, not retried, not blocked",
           page_flow.should_parse("content")
           and not page_flow.should_retry("content")
@@ -3858,6 +3865,158 @@ def check_a_target_5xx_is_content_not_obtained_in_the_scraper_api_client():
     no_status = {"status": "error", "headers": {}, "body": ""}
     code, _, _, _ = run([no_status])
     equal("scraper API: status 'error' with no target status is exit 5", code, 5)
+
+_FORBIDDEN_HTML = "<html><body>403 Forbidden</body></html>"
+_THROTTLED_HTML = "<html><body>429 Too Many Requests</body></html>"
+
+
+def check_the_target_4xx_statuses_classify_by_what_they_say():
+    """404 and 410 say the address does not exist (not_found, exit 4); 403
+    is a refusal (blocked, exit 3); 429 is throttling (throttled: retried
+    with a growing pause, then exit 3). A page that carries its records is
+    content whatever the status."""
+    import page_flow
+    import product_parser as _pp
+    for status, want in ((404, "not_found"), (410, "not_found"),
+                         (403, "blocked"), (429, "throttled")):
+        for body in (NOT_FOUND_HTML, _FORBIDDEN_HTML):
+            equal("HTTP %d on a %d-byte body is %s" % (status, len(body), want),
+                  _pp.detect_page_state(body, status, _DEAD_JOB, "job"), want)
+        equal("HTTP %d with the job's records is still content" % status,
+              _pp.detect_page_state(DETAIL_HTML, status, _GOOD_JOB, "job"), "content")
+    equal("throttle pause doubles from twice --retry-delay",
+          [page_flow.throttle_pause(1, a) for a in range(4)], [2.0, 4.0, 8.0, 16.0])
+    equal("throttle pause is capped",
+          page_flow.throttle_pause(10, 5), page_flow.MAX_THROTTLE_PAUSE_S)
+
+
+def check_target_4xx_statuses_agree_in_every_engine():
+    """The same 410/403/429 outcomes through each engine's real `scrape()`
+    and `_fetch_one_page`, with only the browser primitives stubbed."""
+    import page_flow
+    budget = 1 + page_flow.BLOCK_RETRIES_WITHOUT_POOL
+    for name in ENGINES:
+        job = ["--mode", "job", "--url", _DEAD_JOB, "--retries", "1"]
+        got = _drive_engine_over_routes(name, job + ["--allow-empty"],
+                                        lambda url: (410, NOT_FOUND_HTML))
+        if got is None:
+            continue
+        code, meta, navs, _ = got
+        equal("%s: a target 410 is exit 4, like a 404" % name, code, 4)
+        equal("%s: ...fetched once, not retried" % name, navs.get(_DEAD_JOB), 1)
+        equal("%s: ...counted as not found" % name, (meta or {}).get("jobs_not_found"), 1)
+
+        pauses = []
+        real_pause = page_flow.throttle_pause
+        page_flow.throttle_pause = lambda d, a: pauses.append(a) or 0.0
+        try:
+            for status, body, reason in ((403, _FORBIDDEN_HTML, "blocked_refused"),
+                                         (429, _THROTTLED_HTML, page_flow.THROTTLED)):
+                del pauses[:]
+                route = (lambda st, b: (lambda url: (st, b)))(status, body)
+                code, meta, navs, _ = _drive_engine_over_routes(
+                    name, job + ["--allow-empty"], route)
+                equal("%s: a persistent %d is exit 3" % (name, status), code, 3)
+                equal("%s: ...re-fetched within the block budget" % name,
+                      navs.get(_DEAD_JOB), budget)
+                meta = meta or {}
+                # This repo's finish_run labels a zero-row --allow-empty
+                # sidecar "failed" whatever the cause; stop_reason says which.
+                equal("%s: ...sidecar failed" % name, meta.get("status"), "failed")
+                equal("%s: ...stop_reason for %d" % (name, status),
+                      meta.get("stop_reason"), reason)
+                equal("%s: ...growing pause used only for 429 (%d)" % (name, status),
+                      pauses, list(range(budget - 1)) if status == 429 else [])
+
+                d = tempfile.mkdtemp()
+                prior = os.path.join(d, "o")
+                open(prior + ".json", "w").write('[{"sku": "kept"}]')
+                open(prior + ".meta.json", "w").write('{"status": "complete"}')
+                code, _, _, _ = _drive_engine_over_routes(
+                    name, job + ["--out", prior], route)
+                check("%s: a %d keeps the earlier rows and sidecar" % (name, status),
+                      code == 3 and open(prior + ".json").read() == '[{"sku": "kept"}]'
+                      and open(prior + ".meta.json").read() == '{"status": "complete"}')
+
+                queue = [_GOOD_JOB, _DEAD_JOB]
+                after = (lambda st, b: (lambda url: (200, DETAIL_HTML) if url == _GOOD_JOB
+                                        else (st, b)))(status, body)
+                code, meta, _, _ = _drive_engine_over_routes(
+                    name, ["--mode", "job", "--pages", "2", "--retries", "1"], after,
+                    job_queue=queue)
+                equal("%s: a %d after a good page is exit 6" % (name, status), code, 6)
+                equal("%s: ...partial, page 2 failed" % name,
+                      ((meta or {}).get("status"), (meta or {}).get("pages_failed")),
+                      ("partial", [2]))
+        finally:
+            page_flow.throttle_pause = real_pause
+
+        seen = {"n": 0}
+        def flaky(url):
+            seen["n"] += 1
+            return (429, _THROTTLED_HTML) if seen["n"] == 1 else (200, DETAIL_HTML)
+        code, _, _, _ = _drive_engine_over_routes(
+            name, ["--mode", "job", "--url", _GOOD_JOB, "--retries", "1"], flaky)
+        equal("%s: a 429 that clears on the retry is exit 0" % name, code, 0)
+
+
+def check_target_4xx_statuses_in_the_scraper_api_client():
+    """The same outcomes when the target's status arrives as `http_code` of
+    an HTTP 200 Scraper API answer. No network: requests.post is stubbed."""
+    import page_flow
+    import scraper_api_client as sac
+
+    def answer(code, body):
+        return {"status": "success", "http_code": code, "headers": {}, "body": body}
+
+    def run(bodies, extra=()):
+        out = os.path.join(tempfile.mkdtemp(), "o")
+        calls, sleeps = [], []
+        class _R:
+            status_code = 200
+            headers = {}
+            text = ""
+            def __init__(self, body):
+                self.body = body
+            def json(self):
+                return self.body
+        queue = list(bodies)
+        def fake_post(url, **kw):
+            calls.append(1)
+            return _R(queue.pop(0) if len(queue) > 1 else queue[0])
+        saved = (sac.requests.post, sys.argv, sac.env_config.apply, sac.time.sleep)
+        sac.requests.post = fake_post
+        sac.env_config.apply = lambda a, **k: None
+        sac.time.sleep = sleeps.append
+        sys.argv = ["scraper_api_client.py", "--key", "k" * 8, "--mode", "job",
+                    "--url", _DEAD_JOB, "--format", "json", "--out", out,
+                    "--retries", "2", "--retry-delay", "1"] + list(extra)
+        try:
+            with contextlib.redirect_stdout(io.StringIO()):
+                code = sac.main()
+        finally:
+            sac.requests.post, sys.argv, sac.env_config.apply, sac.time.sleep = saved
+        meta = (json.load(open(out + ".meta.json", encoding="utf-8"))
+                if os.path.exists(out + ".meta.json") else None)
+        return code, meta, len(calls), sleeps
+
+    code, meta, calls, _ = run([answer(410, NOT_FOUND_HTML)], ["--allow-empty"])
+    equal("scraper API: a target 410 is exit 4, once", (code, calls), (4, 1))
+    equal("scraper API: ...counted as not found", (meta or {}).get("jobs_not_found"), 1)
+    for status, body, reason, want_sleeps in (
+            (403, _FORBIDDEN_HTML, "blocked_refused", [1, 1]),
+            (429, _THROTTLED_HTML, page_flow.THROTTLED, [2.0, 4.0])):
+        code, meta, calls, sleeps = run([answer(status, body)])
+        equal("scraper API: a persistent %d is exit 3 after 3 attempts" % status,
+              (code, calls, meta), (3, 3, None))
+        equal("scraper API: ...pauses for %d" % status, sleeps, want_sleeps)
+        code, meta, _, _ = run([answer(status, body)], ["--allow-empty"])
+        meta = meta or {}
+        equal("scraper API: %d + --allow-empty: exit 3 and the stop_reason" % status,
+              (code, meta.get("status"), meta.get("stop_reason")), (3, "failed", reason))
+    code, _, calls, _ = run([answer(429, _THROTTLED_HTML), answer(200, DETAIL_HTML)])
+    equal("scraper API: a 429 that clears on the retry is exit 0", (code, calls), (0, 2))
+
 
 def check_no_engine_branches_on_a_mode_that_does_not_exist():
     """No engine may branch on a mode this repo does not have.

@@ -11,6 +11,34 @@ it from a bill or from a diff.
 
 ## [Unreleased]
 
+> **Behaviour change: target 410 and 429 are decided by their status.**
+> - **410 means the page is gone.** Mercor's 410 is now `not_found`, like a
+>   404: exit 4, fetched once, and counted in `jobs_not_found`. Before, it
+>   was retried and ended as exit 5 (or 4 if the body held an empty
+>   payload).
+> - **429 means throttled.** Mercor's 429 is a new `throttled` state. It
+>   used to be exit 4, "completed", whenever its body had no payload. It is
+>   now retried within the existing block-retry budget, with a pause that
+>   starts at twice `--retry-delay`, doubles and is capped at 60 s. If it
+>   persists, the run stops with `throttled`: exit 3, or 6 after rows.
+> - **Everywhere.** This applies in Playwright, Selenium, pyppeteer and
+>   `scraper_api_client.py`.
+
+### Changed
+- **A refused page has the same stop reason in every engine.** A 403 now
+  ends with `blocked_refused` in Selenium and pyppeteer, which said
+  `blocked_cloudflare (hard block)`; Playwright already said
+  `blocked_refused`.
+- **`scraper_api_client.py` refuses through `finish_run`.** A 403 or a
+  persistent 429 goes through `finish_run` like the browser engines. That
+  means exit 3, earlier output is kept, and with `--allow-empty` a sidecar
+  is written that names the stop reason. Before, it returned a bare 3.
+- **Offline checks.** They drive each engine's real `scrape()` and the real
+  API client through 410, 403 and 429. Each one asserts the exit code, the
+  number of fetches, the stop reason, that the pause is used for 429 only,
+  that earlier output is kept, exit 6 after a good page, and that a 429
+  which clears gives exit 0.
+
 ## [0.1.1] — 2026-10-16
 
 > **Behaviour change: a Mercor 5xx is no longer exit 4.** A page the site

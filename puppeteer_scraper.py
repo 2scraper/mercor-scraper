@@ -890,6 +890,10 @@ def _fetch_one_page(session, args, pool, page_num: int, url: str) -> PageOutcome
         # so a different exit is the only thing that plausibly changes the
         # outcome.
         if block_attempt < block_retries:
+            if state == page_flow.THROTTLED and has_pool:
+                # Throttling is about time as well as the address: pause
+                # (growing per attempt) before the next exit, too.
+                time.sleep(page_flow.throttle_pause(args.retry_delay, block_attempt))
             if has_pool:
                 logger.warning("Page %d came back as %s from %s — retrying "
                                "from another exit (%d/%d).", page_num, state,
@@ -909,7 +913,9 @@ def _fetch_one_page(session, args, pool, page_num: int, url: str) -> PageOutcome
                 # the line above dereferenced `pool.current` on None and the
                 # run died with AttributeError — on any retryable page state,
                 # which no live run had reached until a page was unreadable.
-                pause = args.retry_delay * (block_attempt + 1)
+                pause = (page_flow.throttle_pause(args.retry_delay, block_attempt)
+                         if state == page_flow.THROTTLED
+                         else args.retry_delay * (block_attempt + 1))
                 logger.warning("Page %d came back as %s — re-fetching through "
                                "the same access path in %.1fs (%d/%d).",
                                page_num, state, pause, block_attempt + 1,
@@ -951,6 +957,18 @@ def _fetch_one_page(session, args, pool, page_num: int, url: str) -> PageOutcome
         outcome.final_url = page.url
         return outcome
 
+    if state == page_flow.THROTTLED:
+        # HTTP 429 on every attempt, after growing pauses. A refusal for
+        # now, not an answer about the page: exit 3, or 6 after rows.
+        logger.error("Page %d: Mercor answered HTTP 429 (too many requests) "
+                     "on every attempt (%d). Nothing was obtained from it; "
+                     "this is exit 3, or 6 after earlier rows, NOT an empty "
+                     "result. Wait, raise --delay, or use another exit.",
+                     page_num, block_retries + 1)
+        outcome.blocked_by = page_flow.THROTTLED
+        outcome.final_url = page.url
+        return outcome
+
     if state == "blocked":
         # Mercor has never refused this scraper — see
         # playwright_scraper's twin of this block. This is the HARD refusal.
@@ -966,7 +984,7 @@ def _fetch_one_page(session, args, pool, page_num: int, url: str) -> PageOutcome
             "evidence for what changed. This is exit 3, distinct from an "
             "empty result (exit 4).",
             len(html or ""), references_own_assets(html or ""), debug_html)
-        outcome.blocked_by = "cloudflare (hard block)" if html else "no-response"
+        outcome.blocked_by = "refused" if html else "no-response"
         outcome.final_url = page.url
         return outcome
 

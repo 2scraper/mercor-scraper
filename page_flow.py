@@ -9,7 +9,8 @@ response:
 
     a page whose __NEXT_DATA__ holds records         -> parse
     a page whose __NEXT_DATA__ holds none            -> parse, it is an answer
-    HTTP 404, or the site's own not-found copy       -> stop, it is not a block
+    HTTP 404 or 410, or the site's own not-found copy -> stop, it is not a block
+    HTTP 403 / HTTP 429                              -> blocked / throttled
     a page we could not find a payload in            -> parse_error, dump it
     something else entirely                          -> wait, then retry
 
@@ -191,6 +192,11 @@ STATE_POLICY = {
     # in this family a different exit clears a refusal far more cheaply than
     # a solve does.
     "blocked":     {"retry": True,  "solve": True,  "blocked": True,  "parse": False},
+    # HTTP 429. Retried with a growing pause (see `throttle_pause`) within
+    # the same bounded block-retry budget, never solved, and if it persists
+    # it is a refusal: exit 3, or 6 after earlier rows. Not "empty" and not
+    # "never reached" — the site answered, and the answer was "not now".
+    "throttled":   {"retry": True,  "solve": False, "blocked": True,  "parse": False},
     # A substantial page with no `__NEXT_DATA__` we could read. NOT "zero
     # jobs": a served page that parses to nothing is OUR bug, and reporting
     # it as an empty index sends the reader to check the URL instead of the
@@ -385,12 +391,33 @@ def target_server_error(state: str, status) -> Optional[int]:
     return None
 
 
+# The state, the `blocked_by` value and the stop reason for a page the
+# target kept answering with HTTP 429.
+THROTTLED = "throttled"
+
+# The longest single pause before re-fetching a throttled page, in seconds.
+MAX_THROTTLE_PAUSE_S = 60.0
+
+
+def throttle_pause(retry_delay: float, block_attempt: int) -> float:
+    """Seconds to wait before re-fetching a throttled page.
+
+    Doubles with each block-retry attempt, starting at twice `--retry-delay`,
+    and is capped at MAX_THROTTLE_PAUSE_S. The number of attempts is the
+    engines' existing block-retry budget, so the wait is bounded too.
+    """
+    return min(MAX_THROTTLE_PAUSE_S,
+               float(retry_delay) * (2 ** (int(block_attempt) + 1)))
+
+
 def failure_stop_reason(outcome) -> str:
     """Why a failed page ended the run, in the same words for every engine."""
     if outcome.load_failed:
         return "page_load_timeout"
     if getattr(outcome, "server_error", None) is not None:
         return TARGET_SERVER_ERROR
+    if outcome.blocked_by == THROTTLED:
+        return THROTTLED
     return f"blocked_{outcome.blocked_by}"
 
 

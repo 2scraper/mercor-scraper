@@ -1596,8 +1596,8 @@ def detect_page_state(html: Optional[str], status: Optional[int] = None,
                       url: str = "", mode: str = DEFAULT_MODE) -> str:
     """Name what Mercor answered with.
 
-    One of: `content`, `empty`, `not_found`, `blocked`, `parse_error`,
-    `unknown`.
+    One of: `content`, `empty`, `not_found`, `blocked`, `throttled`,
+    `parse_error`, `unknown`.
 
     The ORDER here is the whole design, and it is the
     classification-order trap stated as code: **order the signals by how
@@ -1613,8 +1613,9 @@ def detect_page_state(html: Optional[str], status: Optional[int] = None,
        the other way (see `references_own_assets`).
     2. A vendor challenge marker is `blocked`. Unambiguous, and nothing on
        this site has ever matched one.
-    3. HTTP 404, or the site's own not-found copy, is `not_found` — a real
-       answer about a real question, not a failure to fetch.
+    3. HTTP 404 or 410, or the site's own not-found copy, is `not_found` —
+       a real answer about a real question, not a failure to fetch. HTTP
+       429 is `throttled`, and HTTP 403 is `blocked`.
     4. A payload with NO records is `empty`: the site served us a page and
        said there is nothing here. On `/explore` that would be a genuinely
        empty index, which is worth reporting as exit 4 rather than
@@ -1647,13 +1648,20 @@ def detect_page_state(html: Optional[str], status: Optional[int] = None,
     # The status is the PRIMARY signal and on this site it is very nearly
     # the only one, so an engine that discards it reports a dead listing as
     # `empty`. All three thread it now; `smoke_test.py` pins that.
-    if status == 404:
+    # 410 is the origin saying the address existed and is gone for good:
+    # the same answer as a 404 for this repo's purposes.
+    if status in (404, 410):
         return "not_found"
     # The cross-engine fallback, for Selenium — which has no status to
     # thread, because WebDriver exposes none. A fetch that ended on the
     # login screen did not get the page it asked for.
     if bounced_to_login(url):
         return "not_found"
+
+    # 429 is throttling: a refusal for now, not an answer about the page.
+    # Before the marker check, because its body says nothing more useful.
+    if status == 429:
+        return "throttled"
 
     marker = detect_bot_challenge(text)
     if marker:

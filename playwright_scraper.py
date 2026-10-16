@@ -1104,6 +1104,10 @@ def _fetch_one_page(session, args, pool, page_num: int, url: str) -> PageOutcome
         # 2026-09-09 — the same URL that answers 403 from a datacentre exit
         # answers 200 from a residential one.
         if block_attempt < block_retries:
+            if state == page_flow.THROTTLED and has_pool:
+                # Throttling is about time as well as the address: pause
+                # (growing per attempt) before the next exit, too.
+                time.sleep(page_flow.throttle_pause(args.retry_delay, block_attempt))
             if has_pool:
                 logger.warning("Page %d came back as %s from %s — retrying "
                                "from another exit (%d/%d).", page_num, state,
@@ -1118,7 +1122,9 @@ def _fetch_one_page(session, args, pool, page_num: int, url: str) -> PageOutcome
                 # one live connection, so tearing the session down and
                 # reconnecting risks `profile_locked` and would lose the very
                 # cookies the retry is meant to build on.
-                pause = args.retry_delay * (block_attempt + 1)
+                pause = (page_flow.throttle_pause(args.retry_delay, block_attempt)
+                         if state == page_flow.THROTTLED
+                         else args.retry_delay * (block_attempt + 1))
                 logger.warning("Page %d came back as %s — re-fetching through "
                                "the same access path in %.1fs (%d/%d). On this "
                                "site that is often what clears it.",
@@ -1158,6 +1164,18 @@ def _fetch_one_page(session, args, pool, page_num: int, url: str) -> PageOutcome
         logger.error("Page %d: Mercor answered HTTP %d (a server error) on every "
                      "attempt. Nothing was obtained from it, so this page is "
                      "FAILED, not empty.", page_num, outcome.server_error)
+        outcome.final_url = session.page.url
+        return outcome
+
+    if state == page_flow.THROTTLED:
+        # HTTP 429 on every attempt, after growing pauses. A refusal for
+        # now, not an answer about the page: exit 3, or 6 after rows.
+        logger.error("Page %d: Mercor answered HTTP 429 (too many requests) "
+                     "on every attempt (%d). Nothing was obtained from it; "
+                     "this is exit 3, or 6 after earlier rows, NOT an empty "
+                     "result. Wait, raise --delay, or use another exit.",
+                     page_num, block_retries + 1)
+        outcome.blocked_by = page_flow.THROTTLED
         outcome.final_url = session.page.url
         return outcome
 

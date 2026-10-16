@@ -70,11 +70,16 @@ MAX_API_TIMEOUT = 120
 # of one exit code is how a family's contract drifts.
 from output_writer import (EXIT_API_ERROR, SOURCE_DEFAULT,  # noqa: E402
                            finish_run)
-from page_flow import TARGET_SERVER_ERROR, target_server_error  # noqa: E402
+from page_flow import (THROTTLED, TARGET_SERVER_ERROR,  # noqa: E402
+                       target_server_error, throttle_pause)
 
-# `_run_once` asks `main` for another attempt after a target 5xx. Never
-# returned as an exit code: the last attempt reports the failure itself.
+# `_run_once` asks `main` for another attempt after a target 5xx, a refusal
+# (403 or a challenge marker) or a 429. Never returned as an exit code: the
+# last attempt reports the failure itself, through `finish_run`.
 _RETRY_TARGET_5XX = -5
+_RETRY_BLOCKED = -3
+_RETRY_THROTTLED = -29
+_RETRY = (3, _RETRY_TARGET_5XX, _RETRY_BLOCKED, _RETRY_THROTTLED)
 
 def _mask_credentials(url: str) -> str:
     """Never print a username:password embedded in a ws://... or http://... URL."""
@@ -222,13 +227,33 @@ def main() -> int:
     attempts = max(1, args.retries + 1)
     for attempt in range(1, attempts + 1):
         rc = _run_once(args, attempt, attempts)
-        if rc not in (3, _RETRY_TARGET_5XX) or attempt == attempts:
+        if rc not in _RETRY or attempt == attempts:
             return rc
-        logger.info("%s on attempt %d/%d — retrying in %ds.",
-                    "Challenge page" if rc == 3 else "Target server error",
-                    attempt, attempts, args.retry_delay)
-        time.sleep(args.retry_delay)
+        # A 429 waits longer each time (the same doubling pause as the
+        # browser engines); everything else waits --retry-delay.
+        pause = (throttle_pause(args.retry_delay, attempt - 1)
+                 if rc == _RETRY_THROTTLED else args.retry_delay)
+        logger.info("%s on attempt %d/%d — retrying in %.1fs.",
+                    {_RETRY_TARGET_5XX: "Target server error",
+                     _RETRY_THROTTLED: "Target HTTP 429 (throttled)"}.get(
+                         rc, "Refusal or challenge page"),
+                    attempt, attempts, pause)
+        time.sleep(pause)
     return rc
+
+
+def _finish_refused(args, stop_reason: str) -> int:
+    """A refused page (403, a challenge, a persistent 429) through the same
+    `finish_run` as the browser engines: exit 3, earlier output kept, and
+    with --allow-empty and nothing earlier, a `blocked` sidecar."""
+    return finish_run([], args.out, args.format, args.allow_empty,
+                      blocked=True, stop_reason=stop_reason,
+                      pages_requested=1, pages_completed=0,
+                      pages_failed=[1], mode=args.mode,
+                      source=SOURCE_DEFAULT, start_url=args.url,
+                      final_url=args.url,
+                      extra={"route_is_paginated": args.mode == "job",
+                             "mode": args.mode})
 
 
 def _run_once(args, attempt: int = 1, attempts: int = 1) -> int:
@@ -260,7 +285,20 @@ def _run_once(args, attempt: int = 1, attempts: int = 1) -> int:
     # engines had.
     state = detect_page_state(html, status=upstream_status, url=args.url,
                               mode=args.mode)
+    if state == THROTTLED:
+        # Mercor's own 429 in `http_code`. Retried within --retries with a
+        # growing pause, then a refusal: exit 3 through finish_run, earlier
+        # output kept. Not an answer about the page.
+        if attempt < attempts:
+            return _RETRY_THROTTLED
+        logger.error("Mercor answered HTTP 429 (too many requests) for %s on "
+                     "every attempt — exit 3, NOT an empty result (exit 4). "
+                     "Wait, or raise --retries/--retry-delay.", args.url)
+        return _finish_refused(args, THROTTLED)
+
     if state == "blocked":
+        if attempt < attempts:
+            return _RETRY_BLOCKED
         dump = f"{args.out}_scraperapi_debug.html"
         with open(dump, "w", encoding="utf-8") as f:
             f.write(html)
@@ -274,7 +312,7 @@ def _run_once(args, attempt: int = 1, attempts: int = 1) -> int:
             "with a country segment, which is the usual next move. This is "
             "exit 3, distinct from an empty result (exit 4).",
             upstream_status, len(html), dump)
-        return 3
+        return _finish_refused(args, "blocked_refused")
 
     stop_reason = ("single_page_route" if args.mode in ("listings", "careers")
                    else "completed")
