@@ -11,6 +11,8 @@ it from a bill or from a diff.
 
 ## [Unreleased]
 
+## [0.1.2] — 2026-10-16
+
 > **Behaviour change: `--allow-empty` writes an empty file only for a genuine
 > empty result.** Its sidecar now says `status: empty` (it was `failed`), and
 > `diff_runs.py` accepts it. A blocked or failed run with `--allow-empty` no
@@ -415,6 +417,7 @@ Four traps cost real time here and are pinned by tests so they stay fixed:
   twice; the first was a supermarket scraper whose price diff tracked a
   blogging platform's "claps".
 
-[Unreleased]: https://github.com/2scraper/mercor-scraper/compare/v0.1.1...HEAD
+[Unreleased]: https://github.com/2scraper/mercor-scraper/compare/v0.1.2...HEAD
+[0.1.2]: https://github.com/2scraper/mercor-scraper/compare/v0.1.1...v0.1.2
 [0.1.1]: https://github.com/2scraper/mercor-scraper/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/2scraper/mercor-scraper/releases/tag/v0.1.0
