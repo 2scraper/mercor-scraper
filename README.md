@@ -1,4 +1,6 @@
-# mercor-scraper
+# Mercor Scraper — AI Talent Jobs and Pay Rates in Python
+
+**Mercor scraper** — an open-source (MIT) Python tool that reads Mercor's job index and individual listings on work.mercor.com plus Mercor's own careers page, and writes job titles, pay rates, work/residence eligibility and company details to JSON or CSV. On 2026-09-18 every route it reads was served in full to a bare datacentre address with no credentials at all, and a re-run on 2026-10-07 from the same address through all three engines was served again. Use it to build a dataset of contract roles and their rates, or compare two runs of the same mode with `diff_runs.py`.
 
 Scrapes [mercor.com](https://mercor.com) — the AI-talent marketplace's job
 index, individual listings, and Mercor's own corporate openings — with
@@ -476,6 +478,23 @@ challenge or a key, the badge goes red on the next weekly run and the claim is
 retested without anyone having to remember to.
 
 ---
+
+## Guides
+
+- [How to run the 2scraper scrapers: setup, proxies, exit codes and access modes](https://2captcha.com/h/how-to-run-2scraper-open-source-scrapers) — installation, `.env`, `.meta.json` for the whole family.
+
+## Related scrapers
+
+Same CLI conventions, same output contract (one row per item, JSON or CSV, a `.meta.json` sidecar and shared exit codes):
+
+- [Wellfound scraper](https://github.com/2scraper/wellfound-scraper) — Startup jobs from Wellfound with salary and equity ranges…
+- [Just Join IT scraper](https://github.com/2scraper/justjoin-scraper) — Polish IT job offers with real salaries, seniority, skill…
+- [Better Business Bureau scraper](https://github.com/2scraper/bbb-scraper) — BBB search and category listings with no key or proxy, plus…
+- [Flippa scraper](https://github.com/2scraper/flippa-scraper) — Online businesses for sale on Flippa
+- [G2 scraper](https://github.com/2scraper/g2-scraper) — Categories, product pages and pricing pages
+- [Google Play scraper](https://github.com/2scraper/googleplay-scraper) — Apps, installs, rating histograms and unbounded reviews…
+
+All scrapers: [github.com/2scraper](https://github.com/2scraper) · Need another site? [Open a request](https://github.com/2scraper/.github/issues/new?title=%5BScraper%20request%5D%20)
 
 ## Licence & contributing
 
